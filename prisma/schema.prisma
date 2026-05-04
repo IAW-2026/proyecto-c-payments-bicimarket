@@ -1,0 +1,165 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ============================================
+// Base User model synced from Clerk via webhook
+// Each app should extend this with its own models
+// ============================================
+
+model User {
+  id        String   @id // Clerk user ID
+  email     String   @unique
+  firstName String?
+  lastName  String?
+  imageUrl  String?
+  role      Role     @default(USER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+// Payments app core models
+model Payment {
+  id                 String   @id @default(cuid())
+  order_id           String
+  buyer_profile_id   String
+  buyer_clerk_user_id String?
+  amount_cents       Int
+  currency           String   @default("ARS")
+  status             String   @default("pending")
+  gateway_reference  String?
+  idempotency_key    String?  @unique
+  approved_at        DateTime?
+  rejected_at        DateTime?
+  created_at         DateTime @default(now())
+  updated_at         DateTime @updatedAt
+
+  payment_attempts   PaymentAttempt[]
+  receipts           Receipt[]
+  settlements        Settlement[]
+  refunds            Refund[]
+
+  @@index([order_id])
+  @@index([status])
+}
+
+model PaymentAttempt {
+  id             String   @id @default(cuid())
+  payment_id     String
+  payment        Payment  @relation(fields: [payment_id], references: [id], onDelete: Cascade)
+  attempt_number Int
+  provider       String   @default("mercadopago")
+  status         String
+  error_code     String?
+  error_message  String?
+  created_at     DateTime @default(now())
+
+  @@index([payment_id])
+}
+
+model Receipt {
+  id             String   @id @default(cuid())
+  payment_id     String
+  payment        Payment  @relation(fields: [payment_id], references: [id], onDelete: Cascade)
+  receipt_number String
+  receipt_url    String
+  amount_cents   Int
+  issued_at      DateTime
+  created_at     DateTime @default(now())
+}
+
+model Settlement {
+  id                   String   @id @default(cuid())
+  payment_id           String
+  payment              Payment  @relation(fields: [payment_id], references: [id], onDelete: Cascade)
+  order_id             String
+  order_seller_group_id String
+  seller_profile_id    String
+  gross_amount_cents   Int
+  fee_amount_cents     Int
+  net_amount_cents     Int
+  currency             String   @default("ARS")
+  status               String   @default("pending")
+  paid_at              DateTime?
+  created_at           DateTime @default(now())
+  updated_at           DateTime @updatedAt
+
+  payouts              Payout[]
+
+  @@unique([payment_id, seller_profile_id])
+  @@index([status])
+}
+
+model Payout {
+  id            String   @id @default(cuid())
+  settlement_id String
+  settlement    Settlement @relation(fields: [settlement_id], references: [id], onDelete: Cascade)
+  transfer_id   String?
+  status        String   @default("pending")
+  attempts      Int      @default(0)
+  last_error    String?
+  started_at    DateTime?
+  completed_at  DateTime?
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+
+  @@index([settlement_id])
+}
+
+model Refund {
+  id               String   @id @default(cuid())
+  payment_id       String
+  payment          Payment  @relation(fields: [payment_id], references: [id], onDelete: Cascade)
+  seller_profile_id String?
+  amount_cents     Int
+  reason           String
+  status           String   @default("pending")
+  gateway_reference String?
+  created_at       DateTime @default(now())
+  updated_at       DateTime @updatedAt
+
+  @@index([payment_id])
+}
+
+model MpWebhookEvent {
+  id              String   @id @default(cuid())
+  mp_event_id     String   @unique
+  event_type      String
+  payload         Json
+  signature_valid Boolean
+  processed_at    DateTime?
+  last_error      String?
+  status          String   @default("received")
+  created_at      DateTime @default(now())
+
+  @@index([status])
+}
+
+model OutboundCallLog {
+  id             String   @id @default(cuid())
+  target_app     String
+  method         String
+  path           String
+  request_body   Json?
+  response_status Int?
+  response_body  Json?
+  attempts       Int      @default(0)
+  last_error     String?
+  succeeded_at   DateTime?
+  created_at     DateTime @default(now())
+
+  @@index([target_app])
+  @@index([succeeded_at])
+}
