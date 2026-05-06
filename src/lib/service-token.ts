@@ -1,14 +1,15 @@
 import crypto from 'crypto'
 
-export function validateServiceToken(token?: string) { // Placeholder validation logic
-  // Skeleton: accept when token equals SERVICE_TOKEN_SECRET env var
-  const secret = process.env.SERVICE_TOKEN_SECRET
-  if (!secret) return false
+export function validateServiceTokenBuyer(token: string | null) { 
   if (!token) return false
+  const secret = process.env.BUYER_TO_PAYMENTS_SERVICE_TOKEN
+  if (!secret) return false
   return token === secret
 }
 
-export function generateServiceTokenMock() {
-  // For testing: returns SERVICE_TOKEN_SECRET if available
-  return process.env.SERVICE_TOKEN_SECRET || 'test-service-token'
+export function validateServiceTokenShipping(token: string | null) {
+  if (!token) return false
+  const secret = process.env.SHIPPING_TO_PAYMENTS_SERVICE_TOKEN
+  if (!secret) return false
+  return token === secret
 }
