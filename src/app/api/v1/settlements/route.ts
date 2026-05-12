@@ -2,14 +2,62 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { extractIdempotencyKey, findByIdempotencyKey } from '@/lib/idempotency'
 import { validateServiceTokenShipping } from '@/lib/service-token'
-import { createCheckoutPreference } from '@/services/mercado-pago.service'
+
+// GET /api/v1/settlements - list settlements with filters
+// Query params: sellerId, status, from, to, page (default 1), limit (default 20)
+export async function GET(req: Request) {
+  try {
+    const url = new URL(req.url)
+    const sellerId = url.searchParams.get('sellerId')
+    const status = url.searchParams.get('status')
+    const from = url.searchParams.get('from')
+    const to = url.searchParams.get('to')
+    const page = Number(url.searchParams.get('page')) || 1
+    const limit = Math.min(Number(url.searchParams.get('limit')) || 20, 100)
+
+    const where: any = {}
+    if (sellerId) where.seller_profile_id = sellerId
+    if (status) where.status = status
+    if (from || to) {
+      where.created_at = {}
+      if (from) where.created_at.gte = new Date(from)
+      if (to) where.created_at.lte = new Date(to)
+    }
+
+    const skip = (page - 1) * limit
+
+    const [settlements, total] = await Promise.all([
+      prisma.settlement.findMany({
+        where,
+        take: limit,
+        skip,
+        orderBy: { created_at: 'desc' },
+        include: { payouts: true }
+      }),
+      prisma.settlement.count({ where })
+    ])
+
+    return NextResponse.json({
+      data: settlements,
+      pagination: {
+        page,
+        limit,
+        total,
+        has_more: skip + limit < total
+      }
+    })
+  } catch (err) {
+    console.error('Error listing settlements:', err)
+    return NextResponse.json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to list settlements' } }, { status: 500 })
+  }
+}
 
 // POST /api/v1/settlements - create settlement (from Shipping App)
 export async function POST(req: Request) {
   try {
     const svcToken = req.headers.get('X-Service-Token') || req.headers.get('x-service-token')
     if (!validateServiceTokenShipping(svcToken)) {
-    return NextResponse.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid service token' } }, { status: 401 })
+      return NextResponse.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid service token' } }, { status: 401 })
     }
 
     const body = await req.json()
@@ -30,8 +78,9 @@ export async function POST(req: Request) {
     }})
 
     // Return settlement
-    return NextResponse.json({ data: { ...settlement, } }, { status: 201 })
+    return NextResponse.json({ data: settlement }, { status: 201 })
   } catch (err) {
+    console.error('Error creating settlement:', err)
     return NextResponse.json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to create settlement' } }, { status: 500 })
   }
 }

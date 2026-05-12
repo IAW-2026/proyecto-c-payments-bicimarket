@@ -1,14 +1,14 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 
-// GET /api/v1/receipts/{id}
+// GET /api/v1/receipts/{receiptId}
 export async function GET(
   req: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ receiptId: string }> }
 ) {
   try {
-    const { id } = await params
-    const receipt = await prisma.receipt.findUnique({ where: { id } })
+    const { receiptId } = await params
+    const receipt = await prisma.receipt.findUnique({ where: { id: receiptId } })
 
     if (!receipt) {
       return NextResponse.json(

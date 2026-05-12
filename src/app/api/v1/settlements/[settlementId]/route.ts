@@ -4,11 +4,14 @@ import { prisma } from '@/lib/prisma'
 // GET /api/v1/settlements/{id}
 export async function GET(
   req: Request,
-  { params }: { params: Promise<{ id: string }> }
+  { params }: { params: Promise<{ settlementId: string }> }
 ) {
   try {
-    const { id } = await params
-    const settlement = await prisma.settlement.findUnique({ where: { id } })
+    const { settlementId } = await params
+    const settlement = await prisma.settlement.findUnique({
+      where: { id: settlementId },
+      include: { payouts: true }
+    })
 
     if (!settlement) {
       return NextResponse.json(
@@ -18,7 +21,8 @@ export async function GET(
     }
 
     return NextResponse.json({ data: settlement })
-  } catch {
+  } catch (err) {
+    console.error('Error fetching settlement:', err)
     return NextResponse.json(
       { error: { code: 'INTERNAL_ERROR', message: 'Failed to get settlement' } },
       { status: 500 }
