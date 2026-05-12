@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
-    "/api//*": ["./src/generated/prisma//*"],
+    "/api/*": ["./src/generated/prisma/*"],
   },
 };
 
