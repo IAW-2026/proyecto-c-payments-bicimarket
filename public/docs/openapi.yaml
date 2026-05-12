@@ -1,0 +1,1014 @@
+openapi: 3.0.1
+info:
+  title: BiciMarket Payments API
+  version: 1.0.0
+  description: |
+    **Owner**: Rocco Paoloni · **Clerk**: `payments.bicimarket` (admin-only)
+    
+    API para gestionar pagos, reembolsos, liquidaciones y payouts. 
+    
+    **Importante**: Buyers y sellers no se loguean en Payments App. Las vistas administrativas usan JWT con `publicMetadata.admin=true`. 
+    Los endpoints server-to-server son consumidos por otras apps con `X-Service-Token`.
+    
+    **Secciones**:
+    - **Pagos**: POST/GET /payments, refund, cancel, confirm (admin override)
+    - **Comprobantes**: GET /receipts
+    - **Liquidaciones**: POST/GET /settlements, payouts
+    - **Webhooks**: Mercado Pago + shipment-delivered trigger
+  
+  x-api-specs:
+    base_path: /api/v1
+    webhook_path: /webhooks/mercadopago
+    version: v1
+    next_version: v2
+
+servers:
+  - url: http://localhost:3000
+    description: Local Development
+    x-env: development
+  - url: https://payments.bicimarket.com
+    description: Production
+    x-env: production
+
+security:
+  - bearerAuth: []
+  - X-Service-Token: []
+
+paths:
+  /api/v1/payments:
+    get:
+      summary: Listar pagos
+      description: |
+        **Filtrar pagos** con paginación estándar.
+        
+        Querystring: `?page=1&limit=20&sort=-created_at&orderId=ord_01H…&status=approved`
+      tags:
+        - "Pagos"
+      parameters:
+        - in: query
+          name: orderId
+          schema: { type: string }
+          description: Filter by order ID
+        - in: query
+          name: buyerId
+          schema: { type: string }
+          description: Filter by buyer profile ID
+        - in: query
+          name: status
+          schema: { type: string, enum: [pending, approved, rejected, cancelled, refunded] }
+        - in: query
+          name: from
+          schema: { type: string, format: date-time }
+          description: Filter by start date (ISO 8601)
+        - in: query
+          name: to
+          schema: { type: string, format: date-time }
+          description: Filter by end date (ISO 8601)
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, maximum: 100 }
+      responses:
+        '200':
+          description: Paginated list of payments
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Payment'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+    post:
+      summary: Crear pago
+      description: |
+        **Crear pago** (Buyer App calls at checkout confirmation).
+        
+        Requiere `Idempotency-Key` header. El `items_summary` especifica cómo se splitea el pago entre sellers.
+      tags:
+        - "Pagos"
+      security:
+        - X-Service-Token: []
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, format: uuid }
+          description: UUID for idempotent payment creation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentCreateRequest'
+      responses:
+        '201':
+          description: Payment created successfully with checkout URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Payment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/payments/{paymentId}:
+    get:
+      summary: Obtener pago
+      description: |
+        **Recuperar detalles de un pago** por su ID.
+        
+        Devuelve estado actual: `pending`, `approved`, `rejected`, `cancelled`, `refunded`.
+      tags:
+        - "Pagos"
+      parameters:
+        - in: path
+          name: paymentId
+          required: true
+          schema: { type: string, pattern: '^pay_' }
+          description: Payment ID (pay_01H...)
+      responses:
+        '200':
+          description: Payment details with current status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Payment'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/payments/{paymentId}/confirm:
+    patch:
+      summary: Override pago
+      description: |
+        **Admin override** para confirmar o rechazar un pago.
+        
+        Server-to-server. Permite forzar un cambio de estado sin validación de MP.
+      tags:
+        - "Pagos"
+      security:
+        - X-Service-Token: []
+      parameters:
+        - in: path
+          name: paymentId
+          required: true
+          schema: { type: string, pattern: '^pay_' }
+          description: Payment ID (pay_01H...)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [approved, rejected]
+                  description: New payment status to set
+                gateway_reference:
+                  type: string
+                  description: Mercado Pago payment ID (mp_...)
+                reason:
+                  type: string
+                  description: Reason for override (audit trail)
+              required: [status]
+      responses:
+        '200':
+          description: Payment status changed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Payment'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/payments/{paymentId}/cancel:
+    post:
+      summary: Cancelar pago
+      description: |
+        **Cancelar pago pendiente**.
+        
+        Solo aplica si `status=pending`. Transiciona a `cancelled`.
+      tags:
+        - "Pagos"
+      parameters:
+        - in: path
+          name: paymentId
+          required: true
+          schema: { type: string, pattern: '^pay_' }
+          description: Payment ID (pay_01H...)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  description: Optional reason for cancellation (audit trail)
+      responses:
+        '200':
+          description: Payment cancelled successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Payment'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Cannot cancel - payment not in pending status or invalid state transition
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /api/v1/payments/{paymentId}/refund:
+    post:
+      summary: Crear reembolso
+      description: |
+        **Reembolsar parte o todo un pago**.
+        
+        Válido después de que el pago sea `approved`. Razones: `seller_rejected`, `buyer_cancelled`, `not_delivered`, `manual`.
+      tags:
+        - "Pagos"
+      parameters:
+        - in: path
+          name: paymentId
+          required: true
+          schema: { type: string, pattern: '^pay_' }
+          description: Payment ID (pay_01H...)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefundCreateRequest'
+      responses:
+        '200':
+          description: Refund created and processed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Refund'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/receipts:
+    get:
+      summary: Listar comprobantes
+      description: |
+        **Listar comprobantes** (receipts) con paginación.
+        
+        Usado por Buyer App y Seller App para mostrar “Mis comprobantes”.
+      tags:
+        - "Comprobantes"
+      parameters:
+        - in: query
+          name: paymentId
+          schema: { type: string }
+          description: Filter by payment ID
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, maximum: 100 }
+      responses:
+        '200':
+          description: List of receipts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Receipt'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+    post:
+      summary: Crear comprobante
+      description: |
+        **Crear comprobante** después de que pago sea aprobado.
+        
+        Server-to-server. Genera PDF y almacena URL.
+      tags:
+        - "Comprobantes"
+      security:
+        - X-Service-Token: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReceiptCreateRequest'
+      responses:
+        '201':
+          description: Receipt created with PDF URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Receipt'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/receipts/{receiptId}:
+    get:
+      summary: Obtener comprobante
+      description: |
+        **Recuperar detalles de un comprobante** (receipt).
+        
+        Devuelve receipt_url para descargar PDF.
+      tags:
+        - "Comprobantes"
+      parameters:
+        - in: path
+          name: receiptId
+          required: true
+          schema: { type: string, pattern: '^rec_' }
+          description: Receipt ID (rec_01H...)
+      responses:
+        '200':
+          description: Receipt details with PDF URL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Receipt'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/settlements:
+    get:
+      summary: Listar liquidaciones
+      description: |
+        **Listar liquidaciones (settlements)** por seller con paginación.
+        
+        Usado por Seller App para mostrar "Mis liquidaciones".
+        
+        Querystring: `?sellerId=slp_01H…&status=paid&from=2026-04-01&to=2026-04-30`
+      tags:
+        - "Liquidaciones"
+      parameters:
+        - in: query
+          name: sellerId
+          schema: { type: string }
+          description: Filter by seller profile ID (slp_...)
+        - in: query
+          name: status
+          schema: { type: string, enum: [pending, paid, failed, manual_review] }
+        - in: query
+          name: from
+          schema: { type: string, format: date-time }
+          description: Filter by start date (ISO 8601)
+        - in: query
+          name: to
+          schema: { type: string, format: date-time }
+          description: Filter by end date (ISO 8601)
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, maximum: 100 }
+      responses:
+        '200':
+          description: Paginated list of settlements
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Settlement'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+    post:
+      summary: Crear liquidación
+      description: |
+        **Crear liquidación** por seller (server-to-server).
+        
+        Disparada internamente por Payments App al recibir `shipment-delivered` del Shipping App.
+        
+        Fórmula: `gross = subtotal + shipping`, `fee = 10% de gross`, `net = gross - fee`.
+      tags:
+        - "Liquidaciones"
+      security:
+        - X-Service-Token: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SettlementCreateRequest'
+      responses:
+        '201':
+          description: Settlement created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Settlement'
+
+  /api/v1/settlements/{settlementId}:
+    get:
+      summary: Obtener liquidación
+      description: |
+        **Recuperar detalles de una liquidación** (settlement).
+        
+        Si ya fue pagada, incluye `paid_at` y `transfer_id`.
+      tags:
+        - "Liquidaciones"
+      parameters:
+        - in: path
+          name: settlementId
+          required: true
+          schema: { type: string, pattern: '^set_' }
+          description: Settlement ID (set_01H...)
+      responses:
+        '200':
+          description: Settlement details including payment status and transfer info
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Settlement'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/payouts:
+    get:
+      summary: Listar payouts
+      description: |
+        **Listar transferencias** a sellers.
+        
+        Estados: `pending`, `in_progress`, `completed`, `failed`, `manual_review`.
+      tags:
+        - "Liquidaciones"
+      parameters:
+        - in: query
+          name: page
+          schema: { type: integer, default: 1 }
+        - in: query
+          name: limit
+          schema: { type: integer, default: 20, maximum: 100 }
+      responses:
+        '200':
+          description: List of payouts with transfer status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Payout'
+                  pagination:
+                    $ref: '#/components/schemas/Pagination'
+    post:
+      summary: Crear payout
+      description: |
+        **Crear transferencia** a Mercado Pago.
+        
+        Disparada por cron interno o admin. Transiciona settlement a `paid` y transfiere `net_amount_cents` al seller.
+      tags:
+        - "Liquidaciones"
+      security:
+        - X-Service-Token: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                settlement_id:
+                  type: string
+                  pattern: '^set_'
+                  description: Settlement ID (set_01H...)
+              required: [settlement_id]
+      responses:
+        '202':
+          description: Payout initiated and in progress
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/Payout'
+
+  /api/v1/internal/shipment-delivered:
+    post:
+      summary: Notificar entrega
+      description: |
+        **Webhook interno para Shipping App** — notifica que envío fue entregado.
+        
+        Triggers: Payments App crea liquidaciones por cada seller del `order_seller_groups`.
+        
+        Request desde Shipping App con `X-Service-Token` válido.
+      tags:
+        - "Webhooks"
+      security:
+        - X-Service-Token: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                shipment_id:
+                  type: string
+                  pattern: '^shp_'
+                  description: Shipment ID (shp_01H...)
+                order_id:
+                  type: string
+                  pattern: '^ord_'
+                  description: Order ID (ord_01H...)
+                order_seller_group_id:
+                  type: string
+                  pattern: '^osg_'
+                  description: Order Seller Group ID (osg_01H...)
+                sales_order_id:
+                  type: string
+                  pattern: '^sor_'
+                  description: Sales Order ID (sor_01H...)
+                seller_profile_id:
+                  type: string
+                  pattern: '^slp_'
+                  description: Seller Profile ID (slp_01H...)
+                delivered_at:
+                  type: string
+                  format: date-time
+                  description: Delivery timestamp (ISO 8601)
+              required: [shipment_id, order_id, order_seller_group_id, sales_order_id, seller_profile_id, delivered_at]
+      responses:
+        '200':
+          description: Shipment received, settlement created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  received:
+                    type: boolean
+                  settlement_id:
+                    type: string
+                    pattern: '^set_'
+                    description: Created Settlement ID (set_01H...)
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /webhooks/mercadopago:
+    post:
+      summary: Webhook de Mercado Pago
+      description: |
+        **Único webhook del sistema** — Mercado Pago notifica cambios de pago.
+        
+        Valida firma con `MERCADOPAGO_WEBHOOK_SECRET`. 
+        
+        Tras recibir, Payments consulta `/v1/payments/{id}` a MP, actualiza estado, y dispara REST a Buyer App (PATCH `/orders/{id}/status`) y Seller App (POST `/sales-orders` por cada seller).
+        
+        Triggereable manualmente en admin UI para dev/testing.
+      tags:
+        - "Webhooks"
+      parameters:
+        - in: header
+          name: x-signature
+          required: true
+          schema: { type: string }
+          description: Signature verification header (MD5 hash)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                id:
+                  type: integer
+                  description: Mercado Pago event ID
+                live_mode:
+                  type: boolean
+                  description: Production vs sandbox
+                type:
+                  type: string
+                  enum: [payment, merchant_order]
+                  description: Event type
+                date_created:
+                  type: string
+                  format: date-time
+                  description: Event creation timestamp (ISO 8601)
+                user_id:
+                  type: integer
+                  description: Mercado Pago user ID
+                api_version:
+                  type: string
+                  description: Mercado Pago API version (v1)
+                action:
+                  type: string
+                  enum: [payment.updated, payment.created, merchant_order.updated, merchant_order.closed]
+                  description: Event action (e.g., payment.updated)
+                data:
+                  type: object
+                  properties:
+                    id:
+                      type: string
+                      description: Payment or order ID from Mercado Pago
+                  required: [id]
+              required: [id, type, data]
+      responses:
+        '200':
+          description: Webhook received and processed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  received:
+                    type: boolean
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Clerk JWT token for UI/authenticated endpoints
+    X-Service-Token:
+      type: apiKey
+      in: header
+      name: X-Service-Token
+      description: Service token for inter-app communication
+
+  schemas:
+    Pagination:
+      type: object
+      properties:
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+        has_more:
+          type: boolean
+        next_cursor:
+          type: string
+          nullable: true
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              description: Machine-readable error code
+            message:
+              type: string
+              description: Human-readable error message
+            details:
+              type: object
+              nullable: true
+              description: Additional error details
+
+    Payment:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Payment ID (pay_...)
+        order_id:
+          type: string
+          description: Order ID (ord_...)
+        buyer_profile_id:
+          type: string
+          description: Buyer profile ID (byp_...)
+        buyer_clerk_user_id:
+          type: string
+          nullable: true
+        amount_cents:
+          type: integer
+          description: Amount in cents
+        currency:
+          type: string
+          default: ARS
+        status:
+          type: string
+          enum: [pending, approved, rejected, cancelled, refunded]
+        method:
+          type: string
+          nullable: true
+          description: Payment method (credit_card, debit_card, etc)
+        card_last4:
+          type: string
+          nullable: true
+        gateway_reference:
+          type: string
+          nullable: true
+          description: Mercado Pago payment ID
+        approved_at:
+          type: string
+          format: date-time
+          nullable: true
+        rejected_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required: [id, order_id, buyer_profile_id, amount_cents, currency, status, created_at, updated_at]
+
+    PaymentCreateRequest:
+      type: object
+      properties:
+        order_id:
+          type: string
+          description: Order ID
+        buyer_clerk_user_id:
+          type: string
+          description: Buyer Clerk user ID
+        buyer_profile_id:
+          type: string
+          description: Buyer profile ID
+        amount_cents:
+          type: integer
+          description: Total amount in cents
+        currency:
+          type: string
+          default: ARS
+        items_summary:
+          type: array
+          description: Breakdown by seller
+          items:
+            type: object
+            properties:
+              seller_profile_id:
+                type: string
+              subtotal_cents:
+                type: integer
+              shipping_cost_cents:
+                type: integer
+            required: [seller_profile_id, subtotal_cents, shipping_cost_cents]
+        return_urls:
+          type: object
+          properties:
+            success:
+              type: string
+            failure:
+              type: string
+            pending:
+              type: string
+      required: [order_id, buyer_clerk_user_id, buyer_profile_id, amount_cents]
+
+    Refund:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Refund ID (ref_...)
+        payment_id:
+          type: string
+        amount_cents:
+          type: integer
+        currency:
+          type: string
+          default: ARS
+        status:
+          type: string
+          enum: [pending, approved, rejected]
+        gateway_reference:
+          type: string
+          nullable: true
+          description: Mercado Pago refund ID
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    RefundCreateRequest:
+      type: object
+      properties:
+        amount_cents:
+          type: integer
+          description: Refund amount in cents
+        reason:
+          type: string
+          enum: [seller_rejected, buyer_cancelled, not_delivered, manual]
+        seller_profile_id:
+          type: string
+          nullable: true
+      required: [amount_cents, reason]
+
+    Receipt:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Receipt ID (rec_...)
+        payment_id:
+          type: string
+        receipt_number:
+          type: string
+        receipt_url:
+          type: string
+          description: PDF URL
+        amount_cents:
+          type: integer
+        currency:
+          type: string
+        issued_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    ReceiptCreateRequest:
+      type: object
+      properties:
+        payment_id:
+          type: string
+        receipt_number:
+          type: string
+        receipt_url:
+          type: string
+        amount_cents:
+          type: integer
+        issued_at:
+          type: string
+          format: date-time
+      required: [payment_id, receipt_number, receipt_url, amount_cents, issued_at]
+
+    Settlement:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Settlement ID (set_...)
+        payment_id:
+          type: string
+        order_id:
+          type: string
+        order_seller_group_id:
+          type: string
+        seller_profile_id:
+          type: string
+        gross_amount_cents:
+          type: integer
+          description: Seller subtotal + shipping
+        fee_amount_cents:
+          type: integer
+          description: Marketplace commission (10%)
+        net_amount_cents:
+          type: integer
+          description: gross - fee
+        currency:
+          type: string
+          default: ARS
+        status:
+          type: string
+          enum: [pending, paid, failed, manual_review]
+        paid_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    SettlementCreateRequest:
+      type: object
+      properties:
+        order_id:
+          type: string
+        order_seller_group_id:
+          type: string
+        seller_profile_id:
+          type: string
+        payment_id:
+          type: string
+        gross_amount_cents:
+          type: integer
+        fee_amount_cents:
+          type: integer
+        net_amount_cents:
+          type: integer
+        currency:
+          type: string
+          default: ARS
+      required: [order_id, order_seller_group_id, seller_profile_id, payment_id, gross_amount_cents, fee_amount_cents, net_amount_cents]
+
+    Payout:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Payout ID (pyt_...)
+        settlement_id:
+          type: string
+        transfer_id:
+          type: string
+          nullable: true
+          description: Mercado Pago transfer ID
+        status:
+          type: string
+          enum: [pending, in_progress, completed, failed, manual_review]
+        attempts:
+          type: integer
+        last_error:
+          type: string
+          nullable: true
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+  responses:
+    BadRequest:
+      description: Invalid request payload
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Missing or invalid authentication (JWT or service token)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Invalid state transition or business logic conflict
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

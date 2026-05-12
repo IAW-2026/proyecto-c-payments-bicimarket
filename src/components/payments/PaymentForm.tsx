@@ -3,7 +3,13 @@ import React, { useState } from 'react'
 import { useCreatePayment } from '@/hooks/use-payments'
 import { toast } from 'sonner'
 
-export default function PaymentForm() {
+interface PaymentFormProps {
+  orderId?: string
+  buyerProfileId?: string
+  itemsSummary?: Array<{ seller_profile_id: string; subtotal_cents: number; shipping_cost_cents: number }>
+}
+
+export default function PaymentForm({ orderId, buyerProfileId, itemsSummary }: PaymentFormProps) {
   const [amount, setAmount] = useState(5000)
   const create = useCreatePayment()
 
@@ -14,8 +20,25 @@ export default function PaymentForm() {
       return
     }
 
+    // Validate required fields
+    if (!orderId) {
+      toast.error('Order ID is required')
+      return
+    }
+    
+    if (!buyerProfileId) {
+      toast.error('Buyer profile ID is required')
+      return
+    }
+
     try {
-      const res = await create.mutateAsync({ order_id: `ord_${Date.now()}`, amount_cents: amount, buyer_profile_id: 'buyer_123' })
+      const res = await create.mutateAsync({
+        order_id: orderId,
+        amount_cents: amount,
+        buyer_profile_id: buyerProfileId,
+        buyer_clerk_user_id: '', // Should come from Clerk auth context
+        items_summary: itemsSummary || []
+      })
       toast.success('Payment created')
       // If checkout_url returned, show it
       if (res?.data?.checkout_url) {
