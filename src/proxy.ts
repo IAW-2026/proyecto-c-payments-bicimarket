@@ -4,7 +4,9 @@ const isPublicRoute = createRouteMatcher([
   "/",
   "/sign-in(.*)",
   "/sign-up(.*)",
+  "/api/v1(.*)",  // All inter-app REST API routes (auth via X-Service-Token or JWT in handlers)
   "/api/webhooks(.*)",
+  "/api/health(.*)",  // Health checks for inter-app monitoring
   "/products(.*)",
   "/api/products(.*)",
 ]);
