@@ -17,8 +17,8 @@ export interface Payment {
   idempotency_key?: string
   approved_at?: Date
   rejected_at?: Date
-  created_at: Date
-  updated_at: Date
+  created_at: string
+  updated_at: string
 }
 
 export interface Settlement {
@@ -33,8 +33,9 @@ export interface Settlement {
   currency: string
   status: SettlementStatus
   paid_at?: Date
-  created_at: Date
-  updated_at: Date
+  payouts?: Payout[]
+  created_at: string
+  updated_at: string
 }
 
 export interface Payout {
@@ -46,8 +47,8 @@ export interface Payout {
   last_error?: string
   started_at?: Date
   completed_at?: Date
-  created_at: Date
-  updated_at: Date
+  created_at: string
+  updated_at: string
 }
 
 export interface Refund {
@@ -58,8 +59,8 @@ export interface Refund {
   reason: RefundReason
   status: RefundStatus
   gateway_reference?: string
-  created_at: Date
-  updated_at: Date
+  created_at: string
+  updated_at: string
 }
 
 export interface MpWebhookEvent {
@@ -71,15 +72,21 @@ export interface MpWebhookEvent {
   processed_at?: Date
   last_error?: string
   status: WebhookStatus
-  created_at: Date
+  created_at: string
 }
 
 export interface PaymentCreateRequest {
   order_id: string
   buyer_profile_id: string
+  buyer_clerk_user_id?: string
   amount_cents: number
   currency?: string
   idempotency_key?: string
+  items_summary?: Array<{
+    seller_profile_id: string
+    subtotal_cents: number
+    shipping_cost_cents: number
+  }>
 }
 
 export interface PaymentResponse {
