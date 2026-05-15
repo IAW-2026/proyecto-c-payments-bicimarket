@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
-import type { PaymentResponse, PaymentCreateRequest } from '@/types/payments'
+import type { Payment, PaymentResponse, PaymentCreateRequest } from '@/types/payments'
+import type { PaymentsResponse } from '@/types/api'
 import type { PaymentFilters } from '@/types/filters'
 
 export function usePayments(filters: PaymentFilters = {}) {
@@ -16,7 +17,7 @@ export function usePayments(filters: PaymentFilters = {}) {
       params.append('page', String(filters.page || 1))
       params.append('limit', String(filters.limit || 20))
 
-      const { data } = await axios.get(`/api/v1/payments?${params.toString()}`)
+      const { data } = await axios.get<PaymentsResponse>(`/api/v1/payments?${params.toString()}`)
       return data
     }
   })
@@ -26,7 +27,7 @@ export function usePayment(paymentId: string) {
   return useQuery({
     queryKey: ['payment', paymentId],
     queryFn: async () => {
-      const { data } = await axios.get(`/api/v1/payments/${paymentId}`)
+      const { data } = await axios.get<{ data: Payment }>(`/api/v1/payments/${paymentId}`)
       return data.data
     },
     enabled: !!paymentId

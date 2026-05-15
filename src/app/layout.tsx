@@ -23,8 +23,8 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Marketplace App",
-  description: "Marketplace de compra-venta entre usuarios",
+  title: "BiciMarket Payments Admin",
+  description: "Payments App admin UI for settlements, refunds, payouts and operational controls.",
 };
 
 export default function RootLayout({

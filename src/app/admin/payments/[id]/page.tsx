@@ -1,168 +1,188 @@
-'use client'
+"use client"
 
-import React from 'react'
-import { usePayment } from '@/hooks/use-payments'
-import { Card } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import Link from 'next/link'
-import { RefundDialog } from '@/components/admin/RefundDialog'
-import { ArrowLeft } from 'lucide-react'
+import Link from "next/link"
+import { useMemo } from "react"
+import { useParams, useRouter } from "next/navigation"
 
-export default function PaymentDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const [id, setId] = React.useState<string>('')
+import { AdminShell } from "@/components/admin/admin-shell"
+import { Icons } from "@/lib/icons"
+import { ARS, formatDate } from "@/lib/currency"
+import { usePayment, useRefundPayment } from "@/hooks/use-payments"
+import { useRefunds } from "@/hooks/use-refunds"
+import { useSettlements } from "@/hooks/use-settlements"
+import type { Refund } from "@/types/payments"
 
-  React.useEffect(() => {
-    params.then(({ id }) => setId(id))
-  }, [params])
+function copy(text: string) { navigator.clipboard.writeText(text) }
 
-  const paymentQuery = usePayment(id)
-  const payment = paymentQuery.data
+export default function PaymentDetailPage() {
+  const params = useParams<{ id: string }>()
+  const router = useRouter()
+  const paymentId = Array.isArray(params.id) ? params.id[0] : params.id
 
-  if (paymentQuery.isLoading) {
-    return <div className="text-center py-8">Loading payment...</div>
-  }
+  const payment = usePayment(paymentId)
+  const settlements = useSettlements({ paymentId, page: 1, limit: 20 })
+  const refunds = useRefunds({ paymentId, page: 1, limit: 20 })
+  const refundPayment = useRefundPayment()
 
-  if (!payment) {
-    return <div className="text-center py-8 text-gray-500">Payment not found</div>
-  }
-
-  function getStatusColor(status: string) {
-    switch (status) {
-      case 'pending':
-        return 'bg-yellow-100 text-yellow-800'
-      case 'approved':
-        return 'bg-green-100 text-green-800'
-      case 'rejected':
-        return 'bg-red-100 text-red-800'
-      default:
-        return 'bg-gray-100 text-gray-800'
+  const stats = useMemo(() => {
+    const settlementList = settlements.data?.data ?? []
+    const refundList = (refunds.data?.data ?? []) as Refund[]
+    return {
+      settlements: settlementList.length,
+      refunds: refundList.length,
+      gross: settlementList.reduce((t, s) => t + s.gross_amount_cents, 0),
+      net: settlementList.reduce((t, s) => t + s.net_amount_cents, 0),
     }
+  }, [refunds.data?.data, settlements.data?.data])
+
+  if (payment.isLoading || !payment.data) {
+    return (
+      <AdminShell active="payments" crumbs={["Admin", "Payments", "detail"]}>
+        <div className="grid-4" style={{ marginBottom: 20 }}>
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="card kpi">
+              <div className="sk" style={{ width: 120, height: 12 }} />
+              <div className="sk" style={{ marginTop: 14, width: 140, height: 28 }} />
+            </div>
+          ))}
+        </div>
+        <div className="card"><div className="sk" style={{ width: "100%", height: 400 }} /></div>
+      </AdminShell>
+    )
+  }
+
+  const d = payment.data
+  const settlementList = settlements.data?.data ?? []
+  const refundList = (refunds.data?.data ?? []) as Refund[]
+
+  const handleRefund = async () => {
+    if (!confirm(`¿Reembolsar ${ARS(d.amount_cents)} del pago ${d.id}?`)) return
+    await refundPayment.mutateAsync({ paymentId: d.id, amount_cents: d.amount_cents, reason: "manual" })
+    router.refresh()
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-4">
-        <Link href="/admin/payments">
-          <Button variant="ghost" size="sm">
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back
-          </Button>
-        </Link>
-        <h1 className="text-3xl font-bold">Payment Details</h1>
+    <AdminShell active="payments" crumbs={["Admin", "Payments", `${d.id.slice(0, 14)}…`]}>
+      <div className="row" style={{ alignItems: "flex-start", justifyContent: "space-between", marginBottom: 20 }}>
+        <div className="col gap-3">
+          <div className="row gap-2">
+            <span className="mono" style={{ fontSize: 13, fontWeight: 500 }}>{d.id}</span>
+            <span className="icon-btn" onClick={() => copy(d.id)} title="Copiar ID"><Icons.Copy /></span>
+            <span className={`badge ${d.status} badge-lg`}><span className="dot" />{d.status}</span>
+          </div>
+          <h1 className="page-title" style={{ fontSize: 30 }}>{ARS(d.amount_cents)}</h1>
+          <div className="row gap-4 muted" style={{ fontSize: 13 }}>
+            <span>Order <span className="mono" style={{ color: "var(--primary)", fontWeight: 500 }}>{d.order_id.slice(0, 18)}…</span></span>
+            <span>·</span>
+            <span>Iniciado {formatDate(d.created_at)}</span>
+            {d.approved_at && <><span>·</span><span>Aprobado {formatDate(d.approved_at)}</span></>}
+          </div>
+        </div>
+        <div className="row gap-2">
+          <button className="btn btn-secondary"><Icons.Download /> Comprobante</button>
+          <button className="btn btn-primary" onClick={handleRefund} disabled={refundPayment.isPending}>
+            <Icons.Undo /> Reembolsar
+          </button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Main Info */}
-        <Card className="p-6">
-          <h2 className="font-bold mb-4">Payment Information</h2>
-          <div className="space-y-3">
-            <div>
-              <div className="text-sm text-gray-600">Payment ID</div>
-              <div className="font-mono font-bold">{payment.id}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-600">Order ID</div>
-              <div className="font-mono font-bold">{payment.order_id}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-600">Amount</div>
-              <div className="text-2xl font-bold">${(payment.amount_cents / 100).toFixed(2)}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-600">Status</div>
-              <Badge className={getStatusColor(payment.status)}>{payment.status}</Badge>
-            </div>
-            <div>
-              <div className="text-sm text-gray-600">Created</div>
-              <div>{new Date(payment.created_at).toLocaleString()}</div>
+      <div className="tabs" style={{ marginBottom: 20 }}>
+        <div className="tab active">Overview</div>
+        <div className="tab">Settlements<span className="ct">{stats.settlements}</span></div>
+        <div className="tab">Refunds<span className="ct">{stats.refunds}</span></div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 16 }}>
+        <div className="col gap-4">
+          <div className="card">
+            <div className="card-head"><h2 className="sec-title">Desglose del cobro</h2></div>
+            <div className="card-body col gap-3">
+              <div className="row" style={{ justifyContent: "space-between" }}>
+                <span className="muted">Total cobrado</span>
+                <span className="tnum" style={{ fontSize: 18, fontWeight: 600 }}>{ARS(d.amount_cents)}</span>
+              </div>
             </div>
           </div>
-        </Card>
 
-        {/* Buyer Info */}
-        <Card className="p-6">
-          <h2 className="font-bold mb-4">Buyer Information</h2>
-          <div className="space-y-3">
-            <div>
-              <div className="text-sm text-gray-600">Buyer Profile ID</div>
-              <div className="font-mono text-sm">{payment.buyer_profile_id}</div>
+          <div className="card">
+            <div className="card-head" style={{ justifyContent: "space-between" }}>
+              <h2 className="sec-title">Settlements derivadas</h2>
+              <span className="muted" style={{ fontSize: 12 }}>{settlementList.length} registros</span>
             </div>
-            <div>
-              <div className="text-sm text-gray-600">Buyer Clerk ID</div>
-              <div className="font-mono text-sm">{payment.buyer_clerk_user_id}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-600">Currency</div>
-              <div>{payment.currency}</div>
-            </div>
-            {payment.gateway_reference && (
-              <div>
-                <div className="text-sm text-gray-600">Gateway Reference</div>
-                <div className="font-mono text-sm">{payment.gateway_reference}</div>
-              </div>
+            {settlementList.length === 0 ? (
+              <div className="card-body muted" style={{ fontSize: 13 }}>Sin settlements asociados.</div>
+            ) : (
+              <table className="t">
+                <thead>
+                  <tr>
+                    <th>Settlement</th>
+                    <th>Seller</th>
+                    <th className="num">Gross</th>
+                    <th className="num">Fee</th>
+                    <th className="num">Net</th>
+                    <th>Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {settlementList.map((s) => (
+                    <tr key={s.id}>
+                      <td className="id"><Link href={`/admin/settlements/${s.id}`} className="row-link">{s.id.slice(0, 14)}…</Link></td>
+                      <td>{s.seller_profile_id.slice(0, 10)}…</td>
+                      <td className="num tnum">{ARS(s.gross_amount_cents, { bare: true })}</td>
+                      <td className="num tnum muted">−{ARS(s.fee_amount_cents, { bare: true })}</td>
+                      <td className="num tnum" style={{ fontWeight: 500 }}>{ARS(s.net_amount_cents, { bare: true })}</td>
+                      <td><span className={`badge ${s.status}`}><span className="dot" />{s.status}</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </div>
-        </Card>
+        </div>
+
+        <div className="col gap-4">
+          <div className="card">
+            <div className="card-head"><h2 className="sec-title">Información del pago</h2></div>
+            <div className="card-body col gap-3">
+              <div className="row" style={{ justifyContent: "space-between" }}>
+                <span className="muted">Payment ID</span>
+                <span className="mono" style={{ fontSize: 12 }}>{d.id}</span>
+              </div>
+              <div className="row" style={{ justifyContent: "space-between" }}>
+                <span className="muted">Order ID</span>
+                <span className="mono" style={{ fontSize: 12 }}>{d.order_id}</span>
+              </div>
+              <div className="row" style={{ justifyContent: "space-between" }}>
+                <span className="muted">Buyer profile</span>
+                <span className="mono" style={{ fontSize: 12 }}>{d.buyer_profile_id}</span>
+              </div>
+              {d.gateway_reference && (
+                <div className="row" style={{ justifyContent: "space-between" }}>
+                  <span className="muted">Gateway ref</span>
+                  <span className="mono" style={{ fontSize: 12 }}>{d.gateway_reference}</span>
+                </div>
+              )}
+              <div className="row" style={{ justifyContent: "space-between" }}>
+                <span className="muted">Currency</span>
+                <span>{d.currency}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-head"><h2 className="sec-title">Comprador</h2></div>
+            <div className="card-body col gap-3">
+              <div className="row gap-3">
+                <span className="avatar" style={{ width: 36, height: 36, fontSize: 13 }}>BP</span>
+                <div className="col">
+                  <span style={{ fontWeight: 500 }}>Buyer Profile</span>
+                  <span className="muted" style={{ fontSize: 12 }}>{d.buyer_clerk_user_id ?? "—"}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
-
-      {/* Refunds */}
-      {payment.refunds && payment.refunds.length > 0 && (
-        <Card className="p-6">
-          <h2 className="font-bold mb-4">Refunds</h2>
-          <div className="space-y-2">
-            {payment.refunds.map((refund: any) => (
-              <div key={refund.id} className="flex justify-between p-3 bg-gray-50 rounded">
-                <div>
-                  <div className="font-mono text-sm">{refund.id}</div>
-                  <div className="text-xs text-gray-500">{refund.reason}</div>
-                </div>
-                <div className="text-right">
-                  <div className="font-bold">${(refund.amount_cents / 100).toFixed(2)}</div>
-                  <Badge variant="outline">{refund.status}</Badge>
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-
-      {/* Settlements */}
-      {payment.settlements && payment.settlements.length > 0 && (
-        <Card className="p-6">
-          <h2 className="font-bold mb-4">Settlements</h2>
-          <div className="space-y-2">
-            {payment.settlements.map((settlement: any) => (
-              <div key={settlement.id} className="flex justify-between p-3 bg-gray-50 rounded">
-                <div>
-                  <Link href={`/admin/settlements/${settlement.id}`}>
-                    <Button variant="ghost" size="sm" className="h-auto p-0">
-                      <div className="font-mono text-sm">{settlement.id}</div>
-                      <div className="text-xs text-gray-500">Seller: {settlement.seller_profile_id.substring(0, 8)}...</div>
-                    </Button>
-                  </Link>
-                </div>
-                <div className="text-right">
-                  <div className="font-bold">${(settlement.net_amount_cents / 100).toFixed(2)}</div>
-                  <Badge variant="outline">{settlement.status}</Badge>
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-      )}
-
-      {/* Actions */}
-      {payment.status === 'approved' && (
-        <Card className="p-6">
-          <h2 className="font-bold mb-4">Actions</h2>
-          <RefundDialog
-            paymentId={payment.id}
-            maxAmount={payment.amount_cents}
-            trigger={<Button>Process Refund</Button>}
-          />
-        </Card>
-      )}
-    </div>
+    </AdminShell>
   )
 }

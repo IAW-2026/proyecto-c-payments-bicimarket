@@ -1,138 +1,166 @@
-'use client'
+"use client"
 
-import { useState } from 'react'
-import { useSettlements } from '@/hooks/use-settlements'
-import { SettlementTable } from '@/components/admin/SettlementTable'
-import { Card } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
-import type { Pagination } from '@/types/api'
+import Link from "next/link"
+import { useMemo, useState } from "react"
+
+import { AdminShell } from "@/components/admin/admin-shell"
+import { Icons } from "@/lib/icons"
+import { ARS, formatDate } from "@/lib/currency"
+import { useMarkSettlementsPaid, useSettlements } from "@/hooks/use-settlements"
+import type { SettlementFilters } from "@/types/filters"
+
+function copy(text: string) { navigator.clipboard.writeText(text) }
 
 export default function SettlementsPage() {
-  const [filters, setFilters] = useState({})
   const [page, setPage] = useState(1)
-  const [sellerId, setSellerId] = useState('')
-  const [status, setStatus] = useState<string | null>(null)
-  const [from, setFrom] = useState('')
-  const [to, setTo] = useState('')
+  const [selected, setSelected] = useState<Set<string>>(new Set())
 
-  const settlementsQuery = useSettlements({ ...filters, page, limit: 20 })
+  const filters = useMemo<SettlementFilters>(() => ({ page, limit: 20 }), [page])
 
-  const settlements = settlementsQuery.data?.data || []
-  const pagination: Pagination = settlementsQuery.data?.pagination || { page: 1, limit: 20, total: 0, has_more: false }
+  const q = useSettlements(filters)
+  const markPaid = useMarkSettlementsPaid()
+  const settlements = q.data?.data ?? []
+  const pagination = q.data?.pagination ?? { page: 1, limit: 20, total: 0, has_more: false }
 
-  const handleApplyFilters = () => {
-    setFilters({
-      sellerId: sellerId || undefined,
-      status: status || undefined,
-      from: from || undefined,
-      to: to || undefined
-    })
-    setPage(1)
+  const totals = settlements.reduce(
+    (a, s) => ({ gross: a.gross + s.gross_amount_cents, fee: a.fee + s.fee_amount_cents, net: a.net + s.net_amount_cents }),
+    { gross: 0, fee: 0, net: 0 },
+  )
+
+  const toggleSelect = (id: string) => {
+    const next = new Set(selected)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    setSelected(next)
+  }
+
+  const selectAll = () => {
+    if (selected.size === settlements.length) setSelected(new Set())
+    else setSelected(new Set(settlements.map((s) => s.id)))
+  }
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    for (const s of settlements) counts[s.status] = (counts[s.status] || 0) + 1
+    return counts
+  }, [settlements])
+
+  const handleMarkPaid = async () => {
+    if (selected.size === 0) return
+    if (!confirm(`¿Marcar ${selected.size} settlements como pagados?`)) return
+    await markPaid.mutateAsync(Array.from(selected))
+    setSelected(new Set())
+  }
+
+  const exportCsv = () => {
+    const header = ["id", "payment_id", "seller_profile_id", "gross_amount_cents", "fee_amount_cents", "net_amount_cents", "status", "created_at"].join(",")
+    const rows = settlements.map((s) =>
+      [s.id, s.payment_id, s.seller_profile_id, s.gross_amount_cents, s.fee_amount_cents, s.net_amount_cents, s.status, s.created_at]
+        .map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","),
+    )
+    const blob = new Blob([[header, ...rows].join("\n")], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a"); a.href = url; a.download = `settlements-${Date.now()}.csv`; a.click()
+    URL.revokeObjectURL(url)
   }
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-3xl font-bold">Settlements Management</h1>
+    <AdminShell active="settlements" crumbs={["Admin", "Settlements"]}>
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-end", marginBottom: 20 }}>
+        <div>
+          <h1 className="page-title">Settlements</h1>
+          <p className="page-sub">Liquidaciones por vendedor. Se generan al confirmar entrega.</p>
+        </div>
+        <div className="row gap-2">
+          <button className="btn btn-secondary" onClick={exportCsv}><Icons.Download /> Exportar</button>
+          <button className="btn btn-primary"><Icons.Send /> Procesar payouts</button>
+        </div>
+      </div>
 
-      {/* Filters */}
-      <Card className="p-4 space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div>
-            <label className="text-sm font-medium mb-1 block">Seller ID</label>
-            <Input
-              placeholder="Filter by seller ID"
-              value={sellerId}
-              onChange={(e) => setSellerId(e.target.value)}
-            />
-          </div>
+      <div className="grid-4 gap-4" style={{ marginBottom: 16 }}>
+        <div className="card kpi"><div className="label">Pendientes</div><div className="v tnum">{statusCounts["pending"] || 0}</div><div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Requieren payout</div></div>
+        <div className="card kpi"><div className="label">Pagados</div><div className="v tnum">{statusCounts["paid"] || 0}</div><div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Completados</div></div>
+        <div className="card kpi"><div className="label">Fallidas</div><div className="v tnum" style={{ color: "oklch(0.55 0.18 25)" }}>{statusCounts["failed"] || 0}</div><div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Requieren reintento</div></div>
+        <div className="card kpi"><div className="label">Manual review</div><div className="v tnum" style={{ color: "oklch(0.50 0.18 305)" }}>{statusCounts["manual_review"] || 0}</div><div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Requiere acción</div></div>
+      </div>
 
-          <div>
-            <label className="text-sm font-medium mb-1 block">Status</label>
-            <Select value={status ?? ''} onValueChange={setStatus}>
-              <SelectTrigger>
-                <SelectValue placeholder="All statuses" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="">All</SelectItem>
-                <SelectItem value="pending">Pending</SelectItem>
-                <SelectItem value="paid">Paid</SelectItem>
-                <SelectItem value="failed">Failed</SelectItem>
-                <SelectItem value="manual_review">Manual Review</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+      <div className="filterbar">
+        <span className="filter-chip has-value"><Icons.Filter />Estado: <span className="v">todos</span> <Icons.Down /></span>
+        <span className="filter-chip"><Icons.Calendar /><span>Fecha</span><Icons.Down /></span>
+        <span className="filter-chip"><span>Seller</span><Icons.Down /></span>
+        <span style={{ flex: 1 }} />
+        <span className="filter-chip active">Este mes</span>
+        <span className="filter-chip">Mes pasado</span>
+      </div>
 
-          <div>
-            <label className="text-sm font-medium mb-1 block">From Date</label>
-            <Input
-              type="date"
-              value={from}
-              onChange={(e) => setFrom(e.target.value)}
-            />
-          </div>
-
-          <div>
-            <label className="text-sm font-medium mb-1 block">To Date</label>
-            <Input
-              type="date"
-              value={to}
-              onChange={(e) => setTo(e.target.value)}
-            />
+      <div className="card">
+        <div style={{ maxHeight: 480, overflow: "auto" }}>
+          <table className="t">
+            <thead>
+              <tr>
+                <th className="checkbox-cell">
+                  <span className={`cb ${selected.size > 0 ? (selected.size === settlements.length ? "checked" : "indeterminate") : ""}`} onClick={selectAll}>
+                    {selected.size === settlements.length ? <Icons.Check /> : selected.size > 0 ? <Icons.Minus /> : null}
+                  </span>
+                </th>
+                <th>Settlement</th>
+                <th>Seller</th>
+                <th>Payment</th>
+                <th className="num"><span className="sort-h">Gross <Icons.Down /></span></th>
+                <th className="num">Fee</th>
+                <th className="num"><span className="sort-h">Net <Icons.Down /></span></th>
+                <th>Estado</th>
+                <th>Fecha</th>
+                <th className="actions-cell"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {q.isLoading ? (
+                <tr><td colSpan={10}>{[0, 1, 2, 3].map((i) => <div key={i} className="sk" style={{ width: "100%", height: 20, margin: 8 }} />)}</td></tr>
+              ) : settlements.length === 0 ? (
+                <tr>
+                  <td colSpan={10} className="empty">
+                    <div className="icon-wrap"><Icons.Coins /></div>
+                    <div className="t">No hay settlements</div>
+                    <div className="s">Los settlements aparecen cuando se entregan órdenes.</div>
+                  </td>
+                </tr>
+              ) : (
+                settlements.map((s) => (
+                  <tr key={s.id} className={selected.has(s.id) ? "row-selected" : ""}>
+                    <td className="checkbox-cell">
+                      <span className={`cb ${selected.has(s.id) ? "checked" : ""}`} onClick={() => toggleSelect(s.id)}>
+                        {selected.has(s.id) ? <Icons.Check /> : null}
+                      </span>
+                    </td>
+                    <td className="id"><Link href={`/admin/settlements/${s.id}`} className="row-link">{s.id.slice(0, 18)}…</Link></td>
+                    <td>{s.seller_profile_id.slice(0, 10)}…</td>
+                    <td className="id">{s.payment_id.slice(0, 14)}…</td>
+                    <td className="num tnum">{ARS(s.gross_amount_cents, { bare: true })}</td>
+                    <td className="num tnum muted">−{ARS(s.fee_amount_cents, { bare: true })}</td>
+                    <td className="num tnum" style={{ fontWeight: 500 }}>{ARS(s.net_amount_cents, { bare: true })}</td>
+                    <td><span className={`badge ${s.status}`}><span className="dot" />{s.status}</span></td>
+                    <td className="muted mono" style={{ fontSize: 12 }}>{formatDate(s.created_at)}</td>
+                    <td className="actions-cell">
+                      <span className="icon-btn" onClick={() => copy(s.id)} title="Copiar ID"><Icons.Copy /></span>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+        <div className="foot-summary">
+          <div className="col"><span className="lbl">Total gross</span><span className="val tnum">{ARS(totals.gross)}</span></div>
+          <div className="col"><span className="lbl">Total fees</span><span className="val tnum">{ARS(totals.fee)}</span></div>
+          <div className="col"><span className="lbl">Total net</span><span className="val tnum">{ARS(totals.net)}</span></div>
+          <div style={{ flex: 1 }} />
+          <div className="row gap-2" style={{ alignSelf: "center" }}>
+            <button className="btn btn-secondary btn-sm" onClick={handleMarkPaid} disabled={selected.size === 0 || markPaid.isPending}>
+              Marcar como pagado ({selected.size})
+            </button>
           </div>
         </div>
-
-        <div className="flex gap-2 justify-end">
-          <Button
-            variant="outline"
-              onClick={() => {
-              setSellerId('')
-              setStatus(null)
-              setFrom('')
-              setTo('')
-              setFilters({})
-            }}
-          >
-            Reset
-          </Button>
-          <Button onClick={handleApplyFilters}>Apply Filters</Button>
-        </div>
-      </Card>
-
-      {/* Settlements Table */}
-      <SettlementTable settlements={settlements} isLoading={settlementsQuery.isLoading} />
-
-      {/* Pagination */}
-      <Card className="p-6">
-        <div className="flex justify-between items-center">
-          <div className="text-sm text-gray-600">
-            Showing {settlements.length} of {pagination.total} settlements
-          </div>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page === 1}
-              onClick={() => setPage(page - 1)}
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </Button>
-            <Button variant="outline" size="sm" disabled>
-              Page {page}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!pagination.has_more}
-              onClick={() => setPage(page + 1)}
-            >
-              <ChevronRight className="w-4 h-4" />
-            </Button>
-          </div>
-        </div>
-      </Card>
-    </div>
+      </div>
+    </AdminShell>
   )
 }

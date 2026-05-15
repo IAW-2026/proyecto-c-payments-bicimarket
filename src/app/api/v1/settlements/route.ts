@@ -4,10 +4,11 @@ import { extractIdempotencyKey, findByIdempotencyKey } from '@/lib/idempotency'
 import { validateServiceTokenShipping } from '@/lib/service-token'
 
 // GET /api/v1/settlements - list settlements with filters
-// Query params: sellerId, status, from, to, page (default 1), limit (default 20)
+// Query params: paymentId, sellerId, status, from, to, page (default 1), limit (default 20)
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url)
+    const paymentId = url.searchParams.get('paymentId')
     const sellerId = url.searchParams.get('sellerId')
     const status = url.searchParams.get('status')
     const from = url.searchParams.get('from')
@@ -16,6 +17,7 @@ export async function GET(req: Request) {
     const limit = Math.min(Number(url.searchParams.get('limit')) || 20, 100)
 
     const where: any = {}
+    if (paymentId) where.payment_id = paymentId
     if (sellerId) where.seller_profile_id = sellerId
     if (status) where.status = status
     if (from || to) {

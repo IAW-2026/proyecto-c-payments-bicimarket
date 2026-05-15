@@ -9,6 +9,7 @@ export interface PaymentFilters {
 }
 
 export interface SettlementFilters {
+  paymentId?: string
   sellerId?: string
   status?: string | null
   from?: string

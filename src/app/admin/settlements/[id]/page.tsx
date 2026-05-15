@@ -1,182 +1,146 @@
-'use client'
+"use client"
 
-import React from 'react'
-import { useSettlement, useCreatePayout } from '@/hooks/use-settlements'
-import { Card } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import Link from 'next/link'
-import { useToast } from '@/hooks/use-toast'
-import { ArrowLeft } from 'lucide-react'
+import Link from "next/link"
+import { useParams } from "next/navigation"
 
-export default function SettlementDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const [id, setId] = React.useState<string>('')
-  const { toast } = useToast()
+import { AdminShell } from "@/components/admin/admin-shell"
+import { Icons } from "@/lib/icons"
+import { ARS, formatDate } from "@/lib/currency"
+import { useCreatePayout, useSettlement } from "@/hooks/use-settlements"
 
-  React.useEffect(() => {
-    params.then(({ id }) => setId(id))
-  }, [params])
+function copy(text: string) { navigator.clipboard.writeText(text) }
 
-  const settlementQuery = useSettlement(id)
-  const settlement = settlementQuery.data
-  const { mutate: createPayout, isPending } = useCreatePayout()
+export default function SettlementDetailPage() {
+  const params = useParams<{ id: string }>()
+  const settlementId = Array.isArray(params.id) ? params.id[0] : params.id
 
-  if (settlementQuery.isLoading) {
-    return <div className="text-center py-8">Loading settlement...</div>
+  const settlement = useSettlement(settlementId)
+  const createPayout = useCreatePayout()
+
+  if (settlement.isLoading || !settlement.data) {
+    return (
+      <AdminShell active="settlements" crumbs={["Admin", "Settlements", "detail"]}>
+        <div className="grid-4" style={{ marginBottom: 20 }}>
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="card kpi">
+              <div className="sk" style={{ width: 120, height: 12 }} />
+              <div className="sk" style={{ marginTop: 14, width: 140, height: 28 }} />
+            </div>
+          ))}
+        </div>
+        <div className="card"><div className="sk" style={{ width: "100%", height: 400 }} /></div>
+      </AdminShell>
+    )
   }
 
-  if (!settlement) {
-    return <div className="text-center py-8 text-gray-500">Settlement not found</div>
-  }
+  const d = settlement.data
+  const feePct = d.gross_amount_cents > 0 ? Math.round((d.fee_amount_cents / d.gross_amount_cents) * 100) : 0
+  const netPct = 100 - feePct
 
-  function getStatusColor(status: string) {
-    switch (status) {
-      case 'pending':
-        return 'bg-yellow-100 text-yellow-800'
-      case 'paid':
-        return 'bg-green-100 text-green-800'
-      case 'failed':
-        return 'bg-red-100 text-red-800'
-      case 'manual_review':
-        return 'bg-blue-100 text-blue-800'
-      default:
-        return 'bg-gray-100 text-gray-800'
-    }
-  }
-
-  const handleCreatePayout = () => {
-    createPayout(settlement.id, {
-      onSuccess: () => {
-        toast({
-          title: 'Payout created',
-          description: 'The payout has been scheduled successfully'
-        })
-      },
-      onError: (err: any) => {
-        toast({
-          title: 'Payout failed',
-          description: err?.response?.data?.error?.message || 'An error occurred',
-          variant: 'destructive'
-        })
-      }
-    })
+  const handleCreatePayout = async () => {
+    if (!confirm(`¿Crear payout para settlement ${d.id}?`)) return
+    await createPayout.mutateAsync(d.id)
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center gap-4">
-        <Link href="/admin/settlements">
-          <Button variant="ghost" size="sm">
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Back
-          </Button>
-        </Link>
-        <h1 className="text-3xl font-bold">Settlement Details</h1>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Main Info */}
-        <Card className="p-6">
-          <h2 className="font-bold mb-4">Settlement Information</h2>
-          <div className="space-y-3">
-            <div>
-              <div className="text-sm text-gray-600">Settlement ID</div>
-              <div className="font-mono font-bold text-sm">{settlement.id}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-600">Order ID</div>
-              <div className="font-mono font-bold">{settlement.order_id}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-600">Status</div>
-              <Badge className={getStatusColor(settlement.status)}>{settlement.status}</Badge>
-            </div>
-            <div>
-              <div className="text-sm text-gray-600">Created</div>
-              <div>{new Date(settlement.created_at).toLocaleString()}</div>
-            </div>
+    <AdminShell active="settlements" crumbs={["Admin", "Settlements", `${d.id.slice(0, 14)}…`]}>
+      <div className="row" style={{ alignItems: "flex-start", justifyContent: "space-between", marginBottom: 20 }}>
+        <div className="col gap-3">
+          <div className="row gap-2">
+            <span className="mono" style={{ fontSize: 13, fontWeight: 500 }}>{d.id}</span>
+            <span className="icon-btn" onClick={() => copy(d.id)} title="Copiar ID"><Icons.Copy /></span>
+            <span className={`badge ${d.status} badge-lg`}><span className="dot" />{d.status}</span>
           </div>
-        </Card>
-
-        {/* Seller Info */}
-        <Card className="p-6">
-          <h2 className="font-bold mb-4">Seller Information</h2>
-          <div className="space-y-3">
-            <div>
-              <div className="text-sm text-gray-600">Seller Profile ID</div>
-              <div className="font-mono text-sm">{settlement.seller_profile_id}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-600">Order Seller Group ID</div>
-              <div className="font-mono text-sm">{settlement.order_seller_group_id}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-600">Currency</div>
-              <div>{settlement.currency}</div>
-            </div>
+          <div className="row gap-3" style={{ alignItems: "baseline" }}>
+            <h1 className="page-title" style={{ fontSize: 30, margin: 0 }}>{ARS(d.net_amount_cents)}</h1>
+            <span className="muted" style={{ fontSize: 14 }}>Net a pagar al seller</span>
           </div>
-        </Card>
-      </div>
-
-      {/* Amount Breakdown */}
-      <Card className="p-6">
-        <h2 className="font-bold mb-4">Amount Breakdown</h2>
-        <div className="space-y-4">
-          <div className="flex justify-between pb-3 border-b">
-            <div>Gross Amount</div>
-            <div className="font-bold">${(settlement.gross_amount_cents / 100).toFixed(2)}</div>
-          </div>
-          <div className="flex justify-between pb-3 border-b text-red-600">
-            <div>Platform Fee</div>
-            <div className="font-bold">-${(settlement.fee_amount_cents / 100).toFixed(2)}</div>
-          </div>
-          <div className="flex justify-between text-lg font-bold pt-3 bg-blue-50 p-3 rounded">
-            <div>Net Amount (Seller receives)</div>
-            <div>${(settlement.net_amount_cents / 100).toFixed(2)}</div>
+          <div className="row gap-4 muted" style={{ fontSize: 13 }}>
+            <span>Payment <Link href={`/admin/payments/${d.payment_id}`} className="mono" style={{ color: "var(--primary)", fontWeight: 500 }}>{d.payment_id.slice(0, 18)}… →</Link></span>
+            <span>·</span>
+            <span>Seller <span className="mono" style={{ color: "var(--primary)", fontWeight: 500 }}>{d.seller_profile_id} →</span></span>
           </div>
         </div>
-      </Card>
+        <div className="row gap-2">
+          <button className="btn btn-secondary"><Icons.Download /> Reporte</button>
+          <button className="btn btn-primary" onClick={handleCreatePayout} disabled={createPayout.isPending}>
+            <Icons.Send /> Disparar payout
+          </button>
+        </div>
+      </div>
 
-      {/* Payouts */}
-      {settlement.payouts && settlement.payouts.length > 0 && (
-        <Card className="p-6">
-          <h2 className="font-bold mb-4">Payouts</h2>
-          <div className="space-y-2">
-            {settlement.payouts.map((payout: any) => (
-              <div key={payout.id} className="flex justify-between p-3 bg-gray-50 rounded">
-                <div>
-                  <div className="font-mono text-sm">{payout.id}</div>
-                  <div className="text-xs text-gray-500">
-                    Attempts: {payout.attempts}
-                    {payout.last_error && ` - Error: ${payout.last_error}`}
-                  </div>
-                </div>
-                <div className="text-right">
-                  <Badge variant="outline">{payout.status}</Badge>
-                  {payout.completed_at && (
-                    <div className="text-xs text-gray-500 mt-1">
-                      {new Date(payout.completed_at).toLocaleString()}
-                    </div>
-                  )}
-                </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 16 }}>
+        <div className="col gap-4">
+          <div className="card">
+            <div className="card-head"><h2 className="sec-title">Cálculo del settlement</h2></div>
+            <div className="card-body col gap-3">
+              <div className="row" style={{ justifyContent: "space-between" }}>
+                <span className="muted">Gross amount</span>
+                <span className="tnum">{ARS(d.gross_amount_cents)}</span>
               </div>
-            ))}
+              <div className="row" style={{ justifyContent: "space-between" }}>
+                <span className="muted">Comisión marketplace <span className="tag">{feePct}%</span></span>
+                <span className="tnum" style={{ color: "oklch(0.55 0.18 25)" }}>−{ARS(d.fee_amount_cents)}</span>
+              </div>
+              <div className="divider" style={{ margin: "4px 0" }} />
+              <div className="row" style={{ justifyContent: "space-between" }}>
+                <span style={{ fontWeight: 600, fontSize: 15 }}>Net a pagar</span>
+                <span className="tnum" style={{ fontSize: 20, fontWeight: 600, color: "var(--primary)" }}>{ARS(d.net_amount_cents)}</span>
+              </div>
+              <div className="bar" style={{ marginTop: 10, height: 14 }}>
+                <div style={{ width: `${netPct}%`, background: "oklch(0.50 0.155 168)" }} />
+                <div style={{ width: `${feePct}%`, background: "oklch(0.55 0.18 25)" }} />
+              </div>
+              <div className="row gap-3" style={{ fontSize: 12, marginTop: 4 }}>
+                <span className="row gap-2"><span style={{ width: 8, height: 8, borderRadius: 2, background: "oklch(0.50 0.155 168)" }} /><span className="muted">Net del seller {netPct}%</span></span>
+                <span className="row gap-2"><span style={{ width: 8, height: 8, borderRadius: 2, background: "oklch(0.55 0.18 25)" }} /><span className="muted">Comisión {feePct}%</span></span>
+              </div>
+            </div>
           </div>
-        </Card>
-      )}
+        </div>
 
-      {/* Actions */}
-      {settlement.status === 'pending' && (
-        <Card className="p-6">
-          <h2 className="font-bold mb-4">Actions</h2>
-          <p className="text-sm text-gray-600 mb-4">
-            Create a payout to transfer the settlement amount to the seller's Mercado Pago account.
-          </p>
-          <Button onClick={handleCreatePayout} disabled={isPending}>
-            {isPending ? 'Creating payout...' : 'Create Payout'}
-          </Button>
-        </Card>
-      )}
-    </div>
+        <div className="col gap-4">
+          <div className="card">
+            <div className="card-head"><h2 className="sec-title">Seller</h2></div>
+            <div className="card-body col gap-3">
+              <div className="row gap-3">
+                <span className="avatar" style={{ width: 38, height: 38, fontSize: 13, background: "oklch(0.50 0.155 168)" }}>SE</span>
+                <div className="col">
+                  <span style={{ fontWeight: 500 }}>Seller</span>
+                  <span className="muted" style={{ fontSize: 12 }}>{d.seller_profile_id}</span>
+                </div>
+                <span className="badge active" style={{ marginLeft: "auto" }}><span className="dot" />active</span>
+              </div>
+              <div className="row" style={{ justifyContent: "space-between" }}>
+                <span className="muted">Seller profile</span>
+                <span className="mono" style={{ fontSize: 12 }}>{d.seller_profile_id}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-head"><h2 className="sec-title">Detalles</h2></div>
+            <div className="card-body col gap-3">
+              <div className="row" style={{ justifyContent: "space-between" }}>
+                <span className="muted">Gross</span>
+                <span className="tnum">{ARS(d.gross_amount_cents)}</span>
+              </div>
+              <div className="row" style={{ justifyContent: "space-between" }}>
+                <span className="muted">Fee</span>
+                <span className="tnum">{ARS(d.fee_amount_cents)}</span>
+              </div>
+              <div className="row" style={{ justifyContent: "space-between" }}>
+                <span className="muted">Net</span>
+                <span className="tnum" style={{ fontWeight: 500 }}>{ARS(d.net_amount_cents)}</span>
+              </div>
+              <div className="row" style={{ justifyContent: "space-between" }}>
+                <span className="muted">Creado</span>
+                <span>{formatDate(d.created_at)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </AdminShell>
   )
 }
