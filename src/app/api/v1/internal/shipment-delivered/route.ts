@@ -1,129 +1,114 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { validateServiceTokenShipping } from '@/lib/service-token'
+import { calculateSettlementAmounts } from '@/services/settlement.service'
+import { notifySellerPaymentStatus } from '@/services/inter-app-client.service'
+import { handleRouteError, badRequest, notFound, unauthorized } from '@/lib/errors'
+import { validateSettlementTransition } from '@/lib/state-machines/settlement'
 
-// POST /api/v1/internal/shipment-delivered - Shipping notifies Payments of delivery (triggers settlement)
 export async function POST(req: Request) {
   try {
-    // Validate X-Service-Token (from Shipping app)
     const svcToken = req.headers.get('X-Service-Token') || req.headers.get('x-service-token')
     if (!validateServiceTokenShipping(svcToken)) {
-      return NextResponse.json(
-        { error: { code: 'UNAUTHORIZED', message: 'Invalid or missing service token' } },
-        { status: 401 }
-      )
+      return unauthorized('Invalid or missing service token')
     }
 
     const body = await req.json()
-
-    // Validate required fields per spec
     const requiredFields = ['shipment_id', 'order_id', 'order_seller_group_id', 'sales_order_id', 'seller_profile_id', 'delivered_at']
     for (const field of requiredFields) {
       if (!body[field]) {
-        return NextResponse.json(
-          { error: { code: 'INVALID_PAYLOAD', message: `Missing required field: ${field}` } },
-          { status: 400 }
-        )
+        return badRequest(`Missing required field: ${field}`)
       }
     }
 
     const { shipment_id, order_id, order_seller_group_id, sales_order_id, seller_profile_id, delivered_at } = body
 
-    // Find the payment by order_id
-    const payment = await prisma.payment.findFirst({
-      where: { order_id }
-    })
-
+    const payment = await prisma.payment.findFirst({ where: { order_id } })
     if (!payment) {
-      return NextResponse.json(
-        { error: { code: 'NOT_FOUND', message: 'Payment not found for order', details: { order_id } } },
-        { status: 404 }
-      )
+      return notFound('Payment not found for order', { order_id })
     }
 
-    // Check if settlement already exists for this seller
-    const existingSettlement = await prisma.settlement.findFirst({
-      where: {
-        payment_id: payment.id,
-        seller_profile_id
-      }
+    const sellerAmounts = getSellerAmountFromPayment(payment, seller_profile_id)
+
+    let settlement = await prisma.settlement.findFirst({
+      where: { payment_id: payment.id, seller_profile_id },
     })
 
-    let settlement
+    if (settlement) {
+      validateSettlementTransition(settlement.status, 'paid')
 
-    if (existingSettlement) {
-      // Update existing settlement to mark as paid (delivered)
-      settlement = await prisma.settlement.update({
-        where: { id: existingSettlement.id },
-        data: {
-          status: 'paid',
-          paid_at: new Date(delivered_at)
-        }
-      })
+      settlement = await prisma.$transaction(async (tx) => {
+        const updated = await tx.settlement.update({
+          where: { id: settlement!.id },
+          data: { status: 'paid', paid_at: new Date(delivered_at) },
+        })
 
-      // Create status history
-      await prisma.settlementStatusHistory.create({
-        data: {
-          settlement_id: settlement.id,
-          from_status: existingSettlement.status as any,
-          to_status: 'paid',
-          changed_by: 'system',
-          reason: 'Shipment delivered'
-        }
+        await tx.settlementStatusHistory.create({
+          data: {
+            settlement_id: updated.id,
+            from_status: settlement!.status,
+            to_status: 'paid',
+            changed_by: 'system',
+            reason: 'Shipment delivered',
+          },
+        })
+
+        return updated
       })
     } else {
-      // Create new settlement - should have been created earlier when payment was approved
-      // But create it here if missing
       settlement = await prisma.settlement.create({
         data: {
           payment_id: payment.id,
           order_id,
           order_seller_group_id,
           seller_profile_id,
-          gross_amount_cents: payment.amount_cents, // Placeholder - should be calculated properly
-          fee_amount_cents: Math.round((10 / 100) * payment.amount_cents),
-          net_amount_cents: Math.round(payment.amount_cents * 0.9),
+          gross_amount_cents: sellerAmounts.gross,
+          fee_amount_cents: sellerAmounts.fee,
+          net_amount_cents: sellerAmounts.net,
           currency: payment.currency,
-          status: 'paid',
-          paid_at: new Date(delivered_at)
-        }
+          status: 'pending',
+        },
       })
 
-      // Create initial status history
       await prisma.settlementStatusHistory.create({
         data: {
           settlement_id: settlement.id,
-          to_status: 'paid',
+          to_status: 'pending',
           changed_by: 'system',
-          reason: 'Settlement created on shipment delivery'
-        }
+          reason: 'Settlement created on shipment delivery',
+        },
       })
     }
 
-    // Log outbound call to Seller app (would be executed async in production)
-    await prisma.outboundCallLog.create({
-      data: {
-        target_app: 'seller',
-        method: 'PATCH',
-        path: `/api/v1/sales-orders/${sales_order_id}/payment-status`,
-        request_body: {
-          payment_status: 'settled',
-          settlement_id: settlement.id,
-          occurred_at: delivered_at
-        },
-        attempts: 0
-      }
-    })
+    try {
+      await notifySellerPaymentStatus(sales_order_id, 'paid', settlement.id)
+    } catch (err) {
+      console.error('Failed to notify seller of payment status:', err)
+    }
 
-    return NextResponse.json(
-      { received: true, settlement_id: settlement.id },
-      { status: 200 }
-    )
+    return NextResponse.json({ received: true, settlement_id: settlement.id }, { status: 200 })
   } catch (err) {
-    console.error('Error processing shipment delivered:', err)
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: 'Failed to process shipment delivery' } },
-      { status: 500 }
-    )
+    return handleRouteError(err, 'processing shipment delivered')
   }
+}
+
+function getSellerAmountFromPayment(payment: { amount_cents: number; items_summary: unknown }, sellerProfileId: string): { gross: number; fee: number; net: number } {
+  if (payment.items_summary && Array.isArray(payment.items_summary)) {
+    const sellerItem = (payment.items_summary as Array<{
+      seller_profile_id: string
+      subtotal_cents: number
+      shipping_cost_cents: number
+    }>).find(item => item.seller_profile_id === sellerProfileId)
+
+    if (sellerItem) {
+      const gross = sellerItem.subtotal_cents + sellerItem.shipping_cost_cents
+      const amounts = calculateSettlementAmounts(gross, 10)
+      return amounts
+    }
+  }
+
+  const singleSellerGross = Math.round(payment.amount_cents / 2)
+  const amounts = calculateSettlementAmounts(singleSellerGross, 10)
+  console.warn(`No items_summary for seller ${sellerProfileId}, using estimated amount ${singleSellerGross}`)
+  return amounts
 }

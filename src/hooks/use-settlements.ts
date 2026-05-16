@@ -36,36 +36,6 @@ export function useSettlement(settlementId: string) {
   })
 }
 
-export function useCreatePayout() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: async (settlementId: string) => {
-      const { data } = await axios.post('/api/v1/payouts', { settlement_id: settlementId })
-      return data.data
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['settlements'] })
-      queryClient.invalidateQueries({ queryKey: ['payouts'] })
-    }
-  })
-}
-
-export function useRetryPayouts() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: async (ids: string[]) => {
-      const { data } = await axios.post('/api/v1/payouts/retry', { ids })
-      return data.data
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['payouts'] })
-      queryClient.invalidateQueries({ queryKey: ['settlements'] })
-    }
-  })
-}
-
 export function useMarkSettlementsPaid() {
   const queryClient = useQueryClient()
 

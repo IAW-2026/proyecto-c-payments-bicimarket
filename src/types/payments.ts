@@ -1,4 +1,4 @@
-export type PaymentStatus = 'pending' | 'approved' | 'rejected' | 'cancelled'
+export type PaymentStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' | 'refunded'
 export type SettlementStatus = 'pending' | 'paid' | 'failed' | 'manual_review'
 export type PayoutStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'manual_review'
 export type RefundStatus = 'pending' | 'approved' | 'failed'
@@ -13,10 +13,13 @@ export interface Payment {
   amount_cents: number
   currency: string
   status: PaymentStatus
+  method?: string
+  card_last4?: string
   gateway_reference?: string
   idempotency_key?: string
   approved_at?: Date
   rejected_at?: Date
+  cancelled_at?: Date
   created_at: string
   updated_at: string
 }
@@ -41,6 +44,7 @@ export interface Settlement {
 export interface Payout {
   id: string
   settlement_id: string
+  settlement?: Settlement
   transfer_id?: string
   status: PayoutStatus
   attempts: number

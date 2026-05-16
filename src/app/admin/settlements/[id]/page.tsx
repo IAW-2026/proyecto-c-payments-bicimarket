@@ -6,7 +6,7 @@ import { useParams } from "next/navigation"
 import { AdminShell } from "@/components/admin/admin-shell"
 import { Icons } from "@/lib/icons"
 import { ARS, formatDate } from "@/lib/currency"
-import { useCreatePayout, useSettlement } from "@/hooks/use-settlements"
+import { useSettlement } from "@/hooks/use-settlements"
 
 function copy(text: string) { navigator.clipboard.writeText(text) }
 
@@ -15,7 +15,26 @@ export default function SettlementDetailPage() {
   const settlementId = Array.isArray(params.id) ? params.id[0] : params.id
 
   const settlement = useSettlement(settlementId)
-  const createPayout = useCreatePayout()
+
+  const downloadReport = () => {
+    if (!settlement.data) return
+    const d = settlement.data
+    const header = ["field", "value"].join(",")
+    const rows = [
+      ["id", d.id],
+      ["payment_id", d.payment_id],
+      ["seller_profile_id", d.seller_profile_id],
+      ["gross_amount_cents", String(d.gross_amount_cents)],
+      ["fee_amount_cents", String(d.fee_amount_cents)],
+      ["net_amount_cents", String(d.net_amount_cents)],
+      ["status", d.status],
+      ["created_at", d.created_at],
+    ].map((r) => r.map((v) => `"${v.replace(/"/g, '""')}"`).join(","))
+    const blob = new Blob([[header, ...rows].join("\n")], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a"); a.href = url; a.download = `settlement-${d.id.slice(0, 14)}.csv`; a.click()
+    URL.revokeObjectURL(url)
+  }
 
   if (settlement.isLoading || !settlement.data) {
     return (
@@ -37,11 +56,6 @@ export default function SettlementDetailPage() {
   const feePct = d.gross_amount_cents > 0 ? Math.round((d.fee_amount_cents / d.gross_amount_cents) * 100) : 0
   const netPct = 100 - feePct
 
-  const handleCreatePayout = async () => {
-    if (!confirm(`¿Crear payout para settlement ${d.id}?`)) return
-    await createPayout.mutateAsync(d.id)
-  }
-
   return (
     <AdminShell active="settlements" crumbs={["Admin", "Settlements", `${d.id.slice(0, 14)}…`]}>
       <div className="row" style={{ alignItems: "flex-start", justifyContent: "space-between", marginBottom: 20 }}>
@@ -62,10 +76,7 @@ export default function SettlementDetailPage() {
           </div>
         </div>
         <div className="row gap-2">
-          <button className="btn btn-secondary"><Icons.Download /> Reporte</button>
-          <button className="btn btn-primary" onClick={handleCreatePayout} disabled={createPayout.isPending}>
-            <Icons.Send /> Disparar payout
-          </button>
+          <button className="btn btn-secondary" onClick={downloadReport}><Icons.Download /> Reporte</button>
         </div>
       </div>
 

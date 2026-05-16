@@ -10,7 +10,7 @@ datasource db {
 }
 
 // ============================================
-// Status enums for type safety
+// Type enums
 // ============================================
 
 enum PaymentStatus {
@@ -21,6 +21,21 @@ enum PaymentStatus {
   refunded
 }
 
+enum PaymentMethod {
+  credit_card
+  debit_card
+  account_money
+  pix
+  bank_transfer
+}
+
+enum PaymentAttemptStatus {
+  pending
+  approved
+  rejected
+  cancelled
+}
+
 enum SettlementStatus {
   pending
   paid
@@ -28,10 +43,39 @@ enum SettlementStatus {
   manual_review
 }
 
+enum PayoutStatus {
+  pending
+  in_progress
+  completed
+  failed
+  manual_review
+}
+
 enum RefundStatus {
   pending
   approved
-  rejected
+  failed
+}
+
+enum RefundReason {
+  seller_rejected
+  buyer_cancelled
+  not_delivered
+  manual
+}
+
+enum WebhookEventStatus {
+  received
+  processed
+  failed
+}
+
+enum HttpMethod {
+  GET
+  POST
+  PUT
+  PATCH
+  DELETE
 }
 
 // Payments app core models
@@ -43,10 +87,14 @@ model Payment {
   amount_cents       Int
   currency           String          @default("ARS")
   status             PaymentStatus   @default(pending)
+  method             PaymentMethod?
+  card_last4         String?
   gateway_reference  String?
   idempotency_key    String?         @unique
+  items_summary      Json?          // per-seller breakdown for settlement calculation
   approved_at        DateTime?
   rejected_at        DateTime?
+  cancelled_at       DateTime?
   created_at         DateTime        @default(now())
   updated_at         DateTime        @updatedAt
   deleted_at         DateTime?
@@ -75,15 +123,17 @@ model PaymentStatusHistory {
 }
 
 model PaymentAttempt {
-  id             String   @id @default(cuid())
-  payment_id     String
-  payment        Payment  @relation(fields: [payment_id], references: [id], onDelete: Cascade)
-  attempt_number Int
-  provider       String   @default("mercadopago")
-  status         String
-  error_code     String?
-  error_message  String?
-  created_at     DateTime @default(now())
+  id               String               @id @default(cuid())
+  payment_id       String
+  payment          Payment              @relation(fields: [payment_id], references: [id], onDelete: Cascade)
+  attempt_number   Int
+  provider         String               @default("mercadopago")
+  status           PaymentAttemptStatus @default(pending)
+  error_code       String?
+  error_message    String?
+  request_payload  Json?
+  response_payload Json?
+  created_at       DateTime             @default(now())
 
   @@index([payment_id])
 }
@@ -138,32 +188,34 @@ model SettlementStatusHistory {
 }
 
 model Payout {
-  id            String   @id @default(cuid())
+  id            String       @id @default(cuid())
   settlement_id String
-  settlement    Settlement @relation(fields: [settlement_id], references: [id], onDelete: Cascade)
+  settlement    Settlement   @relation(fields: [settlement_id], references: [id], onDelete: Cascade)
   transfer_id   String?
-  status        String   @default("pending")
-  attempts      Int      @default(0)
+  status        PayoutStatus @default(pending)
+  attempts      Int          @default(0)
   last_error    String?
   started_at    DateTime?
   completed_at  DateTime?
-  created_at    DateTime @default(now())
-  updated_at    DateTime @updatedAt
+  created_at    DateTime     @default(now())
+  updated_at    DateTime     @updatedAt
+  deleted_at    DateTime?
 
   @@index([settlement_id])
 }
 
 model Refund {
-  id                String     @id @default(cuid())
+  id                String       @id @default(cuid())
   payment_id        String
-  payment           Payment    @relation(fields: [payment_id], references: [id], onDelete: Cascade)
+  payment           Payment      @relation(fields: [payment_id], references: [id], onDelete: Cascade)
   seller_profile_id String?
   amount_cents      Int
-  reason            String
+  currency          String       @default("ARS")
+  reason            RefundReason @default(manual)
   status            RefundStatus @default(pending)
   gateway_reference String?
-  created_at        DateTime   @default(now())
-  updated_at        DateTime   @updatedAt
+  created_at        DateTime     @default(now())
+  updated_at        DateTime     @updatedAt
   deleted_at        DateTime?
 
   status_history    RefundStatusHistory[]
@@ -184,32 +236,44 @@ model RefundStatusHistory {
   @@index([refund_id])
 }
 
+model IdempotencyKey {
+  id         String   @id @default(cuid())
+  key        String   @unique
+  response   Json
+  status     Int
+  created_at DateTime @default(now())
+  expires_at DateTime?
+
+  @@index([key])
+  @@index([created_at])
+}
+
 model MpWebhookEvent {
-  id              String   @id @default(cuid())
-  mp_event_id     String   @unique
+  id              String            @id @default(cuid())
+  mp_event_id     String            @unique
   event_type      String
   payload         Json
   signature_valid Boolean
   processed_at    DateTime?
   last_error      String?
-  status          String   @default("received")
-  created_at      DateTime @default(now())
+  status          WebhookEventStatus @default(received)
+  created_at      DateTime          @default(now())
 
   @@index([status])
 }
 
 model OutboundCallLog {
-  id             String   @id @default(cuid())
-  target_app     String
-  method         String
-  path           String
-  request_body   Json?
+  id              String    @id @default(cuid())
+  target_app      String
+  method          HttpMethod
+  path            String
+  request_body    Json?
   response_status Int?
-  response_body  Json?
-  attempts       Int      @default(0)
-  last_error     String?
-  succeeded_at   DateTime?
-  created_at     DateTime @default(now())
+  response_body   Json?
+  attempts        Int       @default(0)
+  last_error      String?
+  succeeded_at    DateTime?
+  created_at      DateTime  @default(now())
 
   @@index([target_app])
   @@index([succeeded_at])

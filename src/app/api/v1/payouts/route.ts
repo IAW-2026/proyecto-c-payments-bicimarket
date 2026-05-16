@@ -1,84 +1,99 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { requireAdmin } from '@/lib/admin-auth'
+import { handleRouteError, badRequest, notFound, unauthorized } from '@/lib/errors'
+import { extractIdempotencyKey, checkIdempotency, cacheIdempotencyResponse } from '@/lib/idempotency'
 
-// GET /api/v1/payouts - list payouts
 export async function GET(req: Request) {
   try {
+    const adminError = await requireAdmin()
+    if (adminError) return adminError
+
     const url = new URL(req.url)
     const settlementId = url.searchParams.get('settlementId')
     const status = url.searchParams.get('status')
     const page = Number(url.searchParams.get('page')) || 1
     const limit = Math.min(Number(url.searchParams.get('limit')) || 20, 100)
+    const sortBy = url.searchParams.get('sort') || '-created_at'
 
-    const where: any = {}
+    const where: Record<string, unknown> = { deleted_at: null }
     if (settlementId) where.settlement_id = settlementId
     if (status) where.status = status
 
     const skip = (page - 1) * limit
 
+    const sortField = sortBy.startsWith('-') ? sortBy.slice(1) : sortBy
+    const sortDir = sortBy.startsWith('-') ? 'desc' as const : 'asc' as const
+
     const [payouts, total] = await Promise.all([
       prisma.payout.findMany({
-        where,
+        where: where as any,
         take: limit,
         skip,
-        orderBy: { created_at: 'desc' },
-        include: { settlement: true }
+        orderBy: { [sortField]: sortDir } as any,
+        include: { settlement: true },
       }),
-      prisma.payout.count({ where })
+      prisma.payout.count({ where: where as any }),
     ])
 
     return NextResponse.json({
       data: payouts,
-      pagination: {
-        page,
-        limit,
-        total,
-        has_more: skip + limit < total
-      }
+      pagination: { page, limit, total, has_more: skip + limit < total, next_cursor: null },
     })
   } catch (err) {
-    console.error('Error listing payouts:', err)
-    return NextResponse.json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to list payouts' } }, { status: 500 })
+    return handleRouteError(err, 'listing payouts')
   }
 }
 
-// POST /api/v1/payouts - create payout
 export async function POST(req: Request) {
   try {
+    const adminError = await requireAdmin()
+    if (adminError) return adminError
+
+    const idempotencyKey = extractIdempotencyKey(req)
+    if (idempotencyKey) {
+      const cached = await checkIdempotency(idempotencyKey)
+      if (cached.cached) return cached.response
+    }
+
     const body = await req.json()
     const { settlement_id } = body
-
     if (!settlement_id) {
-      return NextResponse.json({ error: { code: 'INVALID_PAYLOAD', message: 'settlement_id is required' } }, { status: 400 })
+      return badRequest('settlement_id is required')
     }
 
-    // Get settlement
     const settlement = await prisma.settlement.findUnique({ where: { id: settlement_id } })
     if (!settlement) {
-      return NextResponse.json({ error: { code: 'NOT_FOUND', message: 'Settlement not found' } }, { status: 404 })
+      return notFound('Settlement not found', { settlement_id })
     }
 
-    // Check if settlement is in pending state
     if (settlement.status !== 'pending') {
-      return NextResponse.json({ error: { code: 'INVALID_STATE', message: `Cannot create payout for settlement in ${settlement.status} state` } }, { status: 400 })
+      return badRequest(`Cannot create payout for settlement in ${settlement.status} state`, {
+        current_status: settlement.status,
+      })
     }
 
-    // Check if payout already exists
     const existingPayout = await prisma.payout.findFirst({ where: { settlement_id } })
     if (existingPayout) {
-      return NextResponse.json({ error: { code: 'PAYOUT_EXISTS', message: 'Payout already exists for this settlement' } }, { status: 400 })
+      return badRequest('Payout already exists for this settlement', { existing_payout_id: existingPayout.id })
     }
 
-    // Create payout record
-    const payout = await prisma.payout.create({ data: {
-      settlement_id,
-      status: 'pending',
-      attempts: 0
-    }})
+    const payout = await prisma.payout.create({
+      data: {
+        settlement_id,
+        status: 'in_progress',
+        attempts: 0,
+        started_at: new Date(),
+      },
+    })
 
-    return NextResponse.json({ data: payout }, { status: 201 })
+    const finalPayout = await prisma.payout.findUnique({ where: { id: payout.id } })
+    const response = { data: finalPayout }
+    if (idempotencyKey) {
+      await cacheIdempotencyResponse(idempotencyKey, response, 202)
+    }
+    return NextResponse.json(response, { status: 202 })
   } catch (err) {
-    console.error('Error creating payout:', err)
-    return NextResponse.json({ error: { code: 'INTERNAL_ERROR', message: 'Failed to create payout' } }, { status: 500 })
+    return handleRouteError(err, 'creating payout')
   }
 }

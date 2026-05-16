@@ -4,6 +4,7 @@ import Link from "next/link"
 import { useMemo, useState } from "react"
 
 import { AdminShell } from "@/components/admin/admin-shell"
+import { FilterDropdown } from "@/components/admin/filter-dropdown"
 import { Icons } from "@/lib/icons"
 import { ARS, formatDate } from "@/lib/currency"
 import { usePayments } from "@/hooks/use-payments"
@@ -17,9 +18,19 @@ export default function PaymentsPage() {
   const [quickFilter, setQuickFilter] = useState("7d")
   const [selected, setSelected] = useState<Set<string>>(new Set())
 
+  const dateFrom = useMemo(() => {
+    const now = new Date()
+    switch (quickFilter) {
+      case "today": return now.toISOString().slice(0, 10)
+      case "7d": return new Date(now.getTime() - 7 * 86400000).toISOString().slice(0, 10)
+      case "30d": return new Date(now.getTime() - 30 * 86400000).toISOString().slice(0, 10)
+      default: return undefined
+    }
+  }, [quickFilter])
+
   const filters = useMemo<PaymentFilters>(
-    () => ({ status: statusFilter || undefined, page, limit: 20 }),
-    [statusFilter, page],
+    () => ({ status: statusFilter || undefined, from: dateFrom, page, limit: 20 }),
+    [statusFilter, dateFrom, page],
   )
 
   const paymentsQuery = usePayments(filters)
@@ -74,16 +85,13 @@ export default function PaymentsPage() {
       </div>
 
       <div className="filterbar">
-        <span className="filter-chip"><Icons.Filter /> Estado <Icons.Down /></span>
-        {statusChips.map((c) => (
-          <span
-            key={c.value}
-            className={`filter-chip ${statusFilter === c.value ? "active" : ""}`}
-            onClick={() => setStatusFilter(c.value)}
-          >
-            {c.label}
-          </span>
-        ))}
+        <FilterDropdown
+          label="Estado"
+          icon={<Icons.Filter />}
+          value={statusFilter}
+          options={statusChips}
+          onChange={(v) => { setStatusFilter(v); setPage(1) }}
+        />
         <span style={{ flex: 1 }} />
         <span className="muted" style={{ fontSize: 12, marginRight: 4 }}>Rápidos:</span>
         <span className={`filter-chip ${quickFilter === "today" ? "active" : ""}`} onClick={() => setQuickFilter("today")}>Hoy</span>
@@ -139,7 +147,7 @@ export default function PaymentsPage() {
                     <td className="id">{p.order_id.slice(0, 18)}…</td>
                     <td className="num tnum" style={{ fontWeight: 500 }}>{ARS(p.amount_cents)}</td>
                     <td><span className={`badge ${p.status}`}><span className="dot" />{p.status}</span></td>
-                    <td className="muted" style={{ fontSize: 12.5 }}>{p.buyer_profile_id.slice(0, 10)}…</td>
+                    <td className="muted" style={{ fontSize: 12.5 }}>{p.method ?? p.buyer_profile_id.slice(0, 10)}…</td>
                     <td className="muted mono" style={{ fontSize: 12 }}>{formatDate(p.created_at)}</td>
                     <td className="id">{p.gateway_reference?.slice(0, 14) ?? <span className="muted">—</span>}…</td>
                     <td className="actions-cell">

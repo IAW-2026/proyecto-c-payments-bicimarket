@@ -12,6 +12,7 @@ interface Receipt {
   id: string
   payment_id: string
   receipt_number: string
+  amount_cents: number
   status: string
   issued_at: string
   download_url?: string
@@ -19,11 +20,16 @@ interface Receipt {
 
 export default function ReceiptsPage() {
   const [page, setPage] = useState(1)
+  const [dateRange, setDateRange] = useState<string>("")
 
   const { data, isLoading } = useQuery({
-    queryKey: ["receipts", page],
+    queryKey: ["receipts", page, dateRange],
     queryFn: async () => {
-      const { data } = await axios.get(`/api/v1/receipts?page=${page}&limit=20`)
+      const params = new URLSearchParams()
+      params.append("page", String(page))
+      params.append("limit", "20")
+      if (dateRange) params.append("from", new Date(Date.now() - Number(dateRange) * 86400000).toISOString().slice(0, 10))
+      const { data } = await axios.get(`/api/v1/receipts?${params.toString()}`)
       return data as { data: Receipt[]; pagination: { page: number; limit: number; total: number; has_more: boolean } }
     },
   })
@@ -33,6 +39,18 @@ export default function ReceiptsPage() {
 
   const copy = (text: string) => navigator.clipboard.writeText(text)
 
+  const exportCsv = () => {
+    const header = ["id", "payment_id", "receipt_number", "amount_cents", "issued_at"].join(",")
+    const rows = receipts.map((r) =>
+      [r.id, r.payment_id, r.receipt_number, r.amount_cents, r.issued_at]
+        .map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","),
+    )
+    const blob = new Blob([[header, ...rows].join("\n")], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a"); a.href = url; a.download = `receipts-${Date.now()}.csv`; a.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <AdminShell active="receipts" crumbs={["Admin", "Receipts"]}>
       <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-end", marginBottom: 20 }}>
@@ -41,17 +59,21 @@ export default function ReceiptsPage() {
           <p className="page-sub">Comprobantes fiscales emitidos por cada cobro. Se generan automáticamente tras la aprobación del pago y están disponibles en PDF.</p>
         </div>
         <div className="row gap-2">
-          <button className="btn btn-secondary"><Icons.Download /> Exportar</button>
+          <button className="btn btn-secondary" onClick={exportCsv}><Icons.Download /> Exportar</button>
         </div>
       </div>
 
       <div className="filterbar">
-        <span className="filter-chip has-value"><Icons.Filter />Estado: <span className="v">todos</span> <Icons.Down /></span>
-        <span className="filter-chip"><Icons.Calendar /><span>Fecha</span><Icons.Down /></span>
-        <span className="filter-chip"><span>Payment ID</span><Icons.Down /></span>
+        <Icons.Filter />
+        <span className={`filter-chip ${dateRange === "7" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "7" ? "" : "7"); setPage(1) }}>7 días</span>
+        <span className={`filter-chip ${dateRange === "30" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "30" ? "" : "30"); setPage(1) }}>30 días</span>
+        <span className={`filter-chip ${dateRange === "90" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "90" ? "" : "90"); setPage(1) }}>90 días</span>
+        {dateRange && (
+          <span className="filter-chip" style={{ color: "var(--destructive)", borderColor: "transparent" }} onClick={() => { setDateRange(""); setPage(1) }}>
+            Limpiar filtros
+          </span>
+        )}
         <span style={{ flex: 1 }} />
-        <span className="filter-chip active">Emitidos</span>
-        <span className="filter-chip">Pendientes</span>
       </div>
 
       <div className="card">
@@ -95,7 +117,7 @@ export default function ReceiptsPage() {
                     </div>
                   </td>
                   <td className="id">{r.payment_id.slice(0, 18)}…</td>
-                  <td className="num tnum">{ARS(500000)}</td>
+                  <td className="num tnum">{ARS(r.amount_cents)}</td>
                   <td><span className={`badge ${r.status === "generated" ? "approved" : "pending"}`}><span className="dot" />{r.status}</span></td>
                   <td className="muted mono" style={{ fontSize: 12 }}>{formatDate(r.issued_at)}</td>
                   <td className="actions-cell">

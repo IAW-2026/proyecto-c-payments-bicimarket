@@ -1,103 +1,149 @@
-import axios from 'axios'
+import axios, { AxiosInstance } from 'axios'
 import { prisma } from '@/lib/prisma'
+import { generateRequestId } from '@/lib/request-id'
+import type { HttpMethod } from '@/generated/prisma/client'
 
-const RETRY_DELAYS = [1000, 3000, 9000] // 1s, 3s, 9s backoff
+const RETRY_DELAYS = [1000, 3000, 9000]
 
-export async function notifyBuyerOrderStatus(orderId: string, status: string) {
-  const buyerBaseUrl = process.env.BUYER_APP_URL
-  const serviceToken = process.env.PAYMENTS_TO_BUYER_SERVICE_TOKEN
-
-  const callId = `buyer-order-${orderId}-${Date.now()}`
-  
-  return retryableCall(callId, {
-    method: 'PATCH',
-    url: `${buyerBaseUrl}/api/v1/orders/${orderId}/status`,
-    data: { status },
-    headers: { 'X-Service-Token': serviceToken, 'Content-Type': 'application/json' }
+function createInterAppClient(baseUrl: string, serviceToken: string): AxiosInstance {
+  const client = axios.create({
+    baseURL: baseUrl,
+    timeout: 5000,
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Service-Token': serviceToken,
+      'User-Agent': 'bicimarket-payments/1.0',
+    },
   })
+
+  client.interceptors.request.use((config) => {
+    config.headers.set('X-Request-Id', generateRequestId())
+    return config
+  })
+
+  return client
 }
 
-export async function createSellerSalesOrder(sellerId: string, payload: any) {
-  const sellerBaseUrl = process.env.SELLER_APP_URL
-  const serviceToken = process.env.PAYMENTS_TO_SELLER_SERVICE_TOKEN
-
-  const callId = `seller-sales-order-${sellerId}-${Date.now()}`
-
-  return retryableCall(callId, {
-    method: 'POST',
-    url: `${sellerBaseUrl}/api/v1/sales-orders`,
-    data: { ...payload, seller_profile_id: sellerId },
-    headers: { 'X-Service-Token': serviceToken, 'Content-Type': 'application/json' }
-  })
+interface OutboundCallRecord {
+  target_app: string
+  method: string
+  path: string
+  request_body: unknown
+  response_status?: number
+  response_body?: unknown
+  attempts: number
+  last_error?: string
+  succeeded_at?: Date
 }
 
-async function retryableCall(callId: string, config: any, attemptNumber = 1) {
+async function logOutboundCall(data: OutboundCallRecord) {
   try {
-    const res = await axios(config)
-    
-    // Log success
+    const method = data.method as HttpMethod
+    await prisma.outboundCallLog.create({ data: { ...data, method } as any })
+  } catch (err) {
+    console.error('Failed to log outbound call:', err)
+  }
+}
+
+async function retryableCall(
+  callId: string,
+  client: AxiosInstance,
+  method: 'GET' | 'POST' | 'PATCH',
+  path: string,
+  data?: unknown,
+  attemptNumber = 1,
+) {
+  try {
+    const res = await client.request({ method, url: path, data })
+
     await logOutboundCall({
-      call_id: callId,
-      target_app: extractTargetApp(config.url),
-      method: config.method,
-      path: extractPath(config.url),
-      request_body: config.data,
+      target_app: client.defaults.baseURL || 'unknown',
+      method,
+      path,
+      request_body: data,
       response_status: res.status,
       response_body: res.data,
       attempts: attemptNumber,
-      succeeded_at: new Date()
+      succeeded_at: new Date(),
     })
 
     return res.data
-  } catch (err: any) {
-    const errorMsg = err?.response?.data?.error?.message || err?.message || 'Unknown error'
+  } catch (err: unknown) {
+    const axiosErr = err as { response?: { data?: { error?: { message?: string } }; status?: number }; message?: string }
+    const errorMsg = axiosErr?.response?.data?.error?.message || axiosErr?.message || 'Unknown error'
     const isLastRetry = attemptNumber > RETRY_DELAYS.length
 
-    // Log failure
     await logOutboundCall({
-      call_id: callId,
-      target_app: extractTargetApp(config.url),
-      method: config.method,
-      path: extractPath(config.url),
-      request_body: config.data,
-      response_status: err?.response?.status,
+      target_app: client.defaults.baseURL || 'unknown',
+      method,
+      path,
+      request_body: data,
+      response_status: axiosErr?.response?.status,
       attempts: attemptNumber,
-      last_error: errorMsg
+      last_error: errorMsg,
     })
 
     if (isLastRetry) {
       throw new Error(`Outbound call failed after ${attemptNumber - 1} retries: ${errorMsg}`)
     }
 
-    // Retry with backoff
     const delay = RETRY_DELAYS[attemptNumber - 1]
     await new Promise(resolve => setTimeout(resolve, delay))
-    return retryableCall(callId, config, attemptNumber + 1)
+    return retryableCall(callId, client, method, path, data, attemptNumber + 1)
   }
 }
 
-async function logOutboundCall(data: any) {
-  try {
-    await prisma.outboundCallLog.create({ data })
-  } catch (err) {
-    console.error('Failed to log outbound call:', err)
-  }
+export async function notifyBuyerOrderStatus(orderId: string, status: string, paymentId: string) {
+  const baseUrl = process.env.BUYER_APP_URL
+  const serviceToken = process.env.PAYMENTS_TO_BUYER_SERVICE_TOKEN
+  if (!baseUrl || !serviceToken) throw new Error('Buyer app URL or service token not configured')
+
+  const client = createInterAppClient(baseUrl, serviceToken)
+  const path = `/api/v1/orders/${orderId}/status`
+  return retryableCall(`buyer-order-${orderId}`, client, 'PATCH', path, {
+    status,
+    source: 'payments',
+    payment_id: paymentId,
+    occurred_at: new Date().toISOString(),
+  })
 }
 
-function extractTargetApp(url: string): string {
-  try {
-    const urlObj = new URL(url)
-    return urlObj.hostname || 'unknown'
-  } catch {
-    return 'unknown'
-  }
+export async function createSellerSalesOrder(sellerProfileId: string, payload: {
+  order_id: string
+  order_seller_group_id: string
+  buyer_profile_id: string
+  buyer_clerk_user_id: string
+  items: Array<{ product_id: string; product_name_snapshot: string; unit_price_cents: number; quantity: number }>
+  items_subtotal_cents: number
+  shipping_cost_cents: number
+  total_cents: number
+  currency: string
+  shipping_address_snapshot: Record<string, unknown>
+  payment_id: string
+}) {
+  const baseUrl = process.env.SELLER_APP_URL
+  const serviceToken = process.env.PAYMENTS_TO_SELLER_SERVICE_TOKEN
+  if (!baseUrl || !serviceToken) throw new Error('Seller app URL or service token not configured')
+
+  const client = createInterAppClient(baseUrl, serviceToken)
+  return retryableCall(`seller-sales-order-${sellerProfileId}`, client, 'POST', '/api/v1/sales-orders', {
+    ...payload,
+    seller_profile_id: sellerProfileId,
+  })
 }
 
-function extractPath(url: string): string {
-  try {
-    const urlObj = new URL(url)
-    return urlObj.pathname + urlObj.search
-  } catch {
-    return url
-  }
+export async function notifySellerPaymentStatus(salesOrderId: string, paymentStatus: string, settlementId?: string) {
+  const baseUrl = process.env.SELLER_APP_URL
+  const serviceToken = process.env.PAYMENTS_TO_SELLER_SERVICE_TOKEN
+  if (!baseUrl || !serviceToken) throw new Error('Seller app URL or service token not configured')
+
+  const client = createInterAppClient(baseUrl, serviceToken)
+  const path = `/api/v1/sales-orders/${salesOrderId}/payment-status`
+  return retryableCall(`seller-payment-status-${salesOrderId}`, client, 'PATCH', path, {
+    payment_status: paymentStatus,
+    settlement_id: settlementId,
+    occurred_at: new Date().toISOString(),
+  })
 }
+
+

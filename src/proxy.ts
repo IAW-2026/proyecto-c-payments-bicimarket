@@ -1,10 +1,13 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 
+// API v1 routes handle their own auth (X-Service-Token for server-to-server,
+// Clerk JWT admin check for admin endpoints). The Clerk middleware only
+// protects page routes - API routes authenticate internally.
 const isPublicRoute = createRouteMatcher([
   "/",
   "/sign-in(.*)",
   "/sign-up(.*)",
-  "/api/v1(.*)",  
+  "/api/v1(.*)",
   "/api/webhooks(.*)",
   "/api/health(.*)",
   "/api-docs(.*)",
@@ -16,11 +19,10 @@ export default clerkMiddleware(async (auth, request) => {
   }
 });
 
+// Admin pages are protected by the layout component's requireAdmin()
 export const config = {
   matcher: [
-    // Skip Next.js internals and all static files
     "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",
-    // Always run for API routes
     "/(api|trpc)(.*)",
   ],
 };

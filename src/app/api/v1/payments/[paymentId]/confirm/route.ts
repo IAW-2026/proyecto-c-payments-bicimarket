@@ -1,67 +1,58 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { Prisma } from '@/generated/prisma'
+import { requireAdmin } from '@/lib/admin-auth'
+import { validatePaymentTransition } from '@/lib/state-machines/payment'
+import { handleRouteError, badRequest, notFound } from '@/lib/errors'
 
-// PATCH /api/v1/payments/{paymentId}/confirm - Admin override to confirm/reject payment
 export async function PATCH(
   req: Request,
   { params }: { params: Promise<{ paymentId: string }> }
 ) {
   try {
+    const adminError = await requireAdmin()
+    if (adminError) return adminError
+
     const { paymentId } = await params
     const body = await req.json()
 
-    // Validate request
     if (!body?.status || !['approved', 'rejected'].includes(body.status)) {
-      return NextResponse.json(
-        { error: { code: 'INVALID_PAYLOAD', message: 'status must be "approved" or "rejected"' } },
-        { status: 400 }
-      )
+      return badRequest('status must be "approved" or "rejected"')
     }
 
-    // Get current payment
-    const payment = await prisma.payment.findUnique({
-      where: { id: paymentId }
-    })
-
+    const payment = await prisma.payment.findUnique({ where: { id: paymentId } })
     if (!payment) {
-      return NextResponse.json(
-        { error: { code: 'NOT_FOUND', message: 'Payment not found', details: { paymentId } } },
-        { status: 404 }
-      )
+      return notFound('Payment not found', { paymentId })
     }
 
-    const newStatus = body.status === 'approved' ? 'approved' : 'rejected'
+    const newStatus = body.status as 'approved' | 'rejected'
+    validatePaymentTransition(payment.status as any, newStatus)
 
-    // Update payment status
-    const updatedPayment = await prisma.payment.update({
-      where: { id: paymentId },
-      data: {
-        status: newStatus as any,
-        gateway_reference: body.gateway_reference || payment.gateway_reference,
-        approved_at: newStatus === 'approved' ? new Date() : payment.approved_at,
-        rejected_at: newStatus === 'rejected' ? new Date() : payment.rejected_at,
-        updated_at: new Date()
-      }
-    })
+    const updatedPayment = await prisma.$transaction(async (tx) => {
+      const updated = await tx.payment.update({
+        where: { id: paymentId },
+        data: {
+          status: newStatus,
+          gateway_reference: body.gateway_reference || payment.gateway_reference,
+          approved_at: newStatus === 'approved' ? new Date() : payment.approved_at,
+          rejected_at: newStatus === 'rejected' ? new Date() : payment.rejected_at,
+        },
+      })
 
-    // Create status history entry
-    await prisma.paymentStatusHistory.create({
-      data: {
-        payment_id: paymentId,
-        from_status: payment.status as any,
-        to_status: newStatus as any,
-        changed_by: 'admin',
-        reason: body.reason || 'Admin override confirmation'
-      }
+      await tx.paymentStatusHistory.create({
+        data: {
+          payment_id: paymentId,
+          from_status: payment.status,
+          to_status: newStatus,
+          changed_by: 'system',
+          reason: body.reason || 'Admin override confirmation',
+        },
+      })
+
+      return updated
     })
 
     return NextResponse.json({ data: updatedPayment }, { status: 200 })
   } catch (err) {
-    console.error('Error confirming payment:', err)
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: 'Failed to confirm payment' } },
-      { status: 500 }
-    )
+    return handleRouteError(err, 'confirming payment')
   }
 }

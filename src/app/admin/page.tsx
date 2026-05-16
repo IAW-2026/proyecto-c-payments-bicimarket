@@ -9,10 +9,10 @@ import { ARS, formatDate } from "@/lib/currency"
 import { usePayments } from "@/hooks/use-payments"
 import { useSettlements } from "@/hooks/use-settlements"
 
-function Spark({ data = [3, 4, 3, 5, 6, 5, 7, 6, 8, 9, 8, 10], color = "oklch(0.50 0.155 168)" }) {
+function Spark({ data = [0], color = "oklch(0.50 0.155 168)" }) {
   const w = 140, h = 32
   const max = Math.max(...data), min = Math.min(...data)
-  const step = w / (data.length - 1)
+  const step = (data.length > 1) ? w / (data.length - 1) : w
   const norm = (v: number) => h - ((v - min) / ((max - min) || 1)) * (h - 4) - 2
   const path = data.map((v, i) => `${i === 0 ? "M" : "L"} ${i * step} ${norm(v)}`).join(" ")
   const area = `${path} L ${w} ${h} L 0 ${h} Z`
@@ -30,6 +30,28 @@ function Spark({ data = [3, 4, 3, 5, 6, 5, 7, 6, 8, 9, 8, 10], color = "oklch(0.
   )
 }
 
+function bucketData<T>(items: T[], getDate: (item: T) => string, getValue: (item: T) => number, buckets = 12): number[] {
+  if (items.length === 0) return Array(buckets).fill(0)
+  const times = items.map((i) => new Date(getDate(i)).getTime())
+  const min = Math.min(...times)
+  const range = Math.max(...times) - min || 1
+  const data = Array(buckets).fill(0)
+  for (const item of items) {
+    const t = new Date(getDate(item)).getTime()
+    const idx = Math.min(Math.floor((t - min) / range * buckets), buckets - 1)
+    data[idx] += getValue(item)
+  }
+  return data
+}
+
+function halfChange(items: number[]) {
+  if (items.length < 2) return { pct: 0, abs: 0 }
+  const mid = Math.max(1, Math.floor(items.length / 2))
+  const first = items.slice(0, mid).reduce((a, b) => a + b, 0)
+  const second = items.slice(mid).reduce((a, b) => a + b, 0)
+  return { pct: first > 0 ? ((second - first) / first) * 100 : 0, abs: second - first }
+}
+
 export default function AdminDashboardPage() {
   const payments = usePayments({ limit: 100 })
   const settlements = useSettlements({ limit: 100 })
@@ -38,17 +60,62 @@ export default function AdminDashboardPage() {
     const pList = payments.data?.data ?? []
     const sList = settlements.data?.data ?? []
 
-    const totalPayments = pList.length
-    const totalVolume = pList.reduce((a, p) => a + p.amount_cents, 0)
+    const sortedP = [...pList].sort((a, b) =>
+      new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+    )
+    const sortedS = [...sList].sort((a, b) =>
+      new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+    )
+
+    const volumeByDate = sortedP.map((p) => p.amount_cents)
+    const failedByDate = sortedP
+      .filter((p) => p.status === "rejected" || p.status === "cancelled")
+      .map((p) => 1)
+    const pendingByDate = sortedS
+      .filter((s) => s.status === "pending" || s.status === "manual_review")
+      .map((s) => 1)
+
+    const countChange = halfChange(sortedP.map(() => 1))
+    const volumeChange = halfChange(volumeByDate)
+    const failedChange = halfChange(failedByDate)
+    const pendingChange = halfChange(pendingByDate)
+
+    const totalVolume = sortedP.reduce((a, p) => a + p.amount_cents, 0)
+    const pendingCount = sList.filter((s) => s.status === "pending" || s.status === "manual_review").length
     const failedCount = pList.filter((p) => p.status === "rejected" || p.status === "cancelled").length
-    const pendingSettlements = sList.filter((s) => s.status === "pending" || s.status === "manual_review").length
 
     return {
-      totalPayments: totalPayments.toLocaleString("es-AR"),
-      totalVolume: totalVolume,
-      failedCount,
-      pendingSettlements,
+      totalPayments: pList.length.toLocaleString("es-AR"),
       totalVolumeFormatted: `ARS ${(totalVolume / 100_000_000).toFixed(2).replace(".", ",")}M`,
+      pendingSettlements: pendingCount,
+      failedCount,
+
+      countPct: countChange.pct,
+      countDir: countChange.pct >= 0 ? "up" : "down",
+      countIcon: countChange.pct >= 0 ? Icons.Trend : Icons.TrendDown,
+
+      volPct: volumeChange.pct,
+      volDir: volumeChange.pct >= 0 ? "up" : "down",
+      volIcon: volumeChange.pct >= 0 ? Icons.Trend : Icons.TrendDown,
+
+      pendingDiff: pendingChange.abs,
+      pendingDir: pendingChange.abs <= 0 ? "down" : "up",
+      pendingIcon: pendingChange.abs <= 0 ? Icons.TrendDown : Icons.Trend,
+
+      failedDiff: failedChange.abs,
+      failedDir: failedChange.abs <= 0 ? "down" : "up",
+      failedIcon: failedChange.abs <= 0 ? Icons.TrendDown : Icons.Trend,
+
+      countSpark: bucketData(pList, (p) => p.created_at, () => 1),
+      volSpark: bucketData(pList, (p) => p.created_at, (p) => p.amount_cents),
+      pendingSpark: bucketData(
+        sList.filter((s) => s.status === "pending" || s.status === "manual_review"),
+        (s) => s.created_at, () => 1,
+      ),
+      failedSpark: bucketData(
+        pList.filter((p) => p.status === "rejected" || p.status === "cancelled"),
+        (p) => p.created_at, () => 1,
+      ),
     }
   }, [payments.data?.data, settlements.data?.data])
 
@@ -73,32 +140,40 @@ export default function AdminDashboardPage() {
           <div className="label">Pagos procesados</div>
           <div className="v tnum">{kpis.totalPayments}</div>
           <div className="row" style={{ justifyContent: "space-between" }}>
-            <span className="delta up"><Icons.Trend />+12.4%</span>
-            <Spark data={[3, 4, 3, 5, 6, 5, 7, 6, 8, 9, 8, 10]} />
+            <span className={`delta ${kpis.countDir}`}>
+              <kpis.countIcon />{kpis.countPct >= 0 ? "+" : ""}{kpis.countPct.toFixed(1)}%
+            </span>
+            <Spark data={kpis.countSpark} />
           </div>
         </div>
         <div className="card kpi">
           <div className="label">Volumen transaccionado</div>
           <div className="v tnum">{kpis.totalVolumeFormatted}</div>
           <div className="row" style={{ justifyContent: "space-between" }}>
-            <span className="delta up"><Icons.Trend />+8.1%</span>
-            <Spark data={[4, 5, 5, 6, 7, 6, 8, 9, 8, 10, 11, 12]} />
+            <span className={`delta ${kpis.volDir}`}>
+              <kpis.volIcon />{kpis.volPct >= 0 ? "+" : ""}{kpis.volPct.toFixed(1)}%
+            </span>
+            <Spark data={kpis.volSpark} color="oklch(0.50 0.155 168)" />
           </div>
         </div>
         <div className="card kpi">
           <div className="label">Settlements pendientes</div>
           <div className="v tnum">{kpis.pendingSettlements}</div>
           <div className="row" style={{ justifyContent: "space-between" }}>
-            <span className="delta down"><Icons.TrendDown />−4</span>
-            <Spark data={[8, 9, 9, 8, 7, 8, 7, 6, 7, 6, 5, 4]} color="oklch(0.65 0.13 168)" />
+            <span className={`delta ${kpis.pendingDir}`}>
+              <kpis.pendingIcon />{kpis.pendingDiff >= 0 ? "+" : ""}{kpis.pendingDiff}
+            </span>
+            <Spark data={kpis.pendingSpark} color="oklch(0.65 0.13 168)" />
           </div>
         </div>
         <div className="card kpi">
           <div className="label">Transacciones fallidas</div>
           <div className="v tnum">{kpis.failedCount}</div>
           <div className="row" style={{ justifyContent: "space-between" }}>
-            <span className="delta down"><Icons.TrendDown />+5</span>
-            <Spark data={[1, 2, 1, 2, 3, 2, 3, 2, 3, 4, 3, 5]} color="oklch(0.55 0.18 25)" />
+            <span className={`delta ${kpis.failedDir}`}>
+              <kpis.failedIcon />{kpis.failedDiff >= 0 ? "+" : ""}{kpis.failedDiff}
+            </span>
+            <Spark data={kpis.failedSpark} color="oklch(0.55 0.18 25)" />
           </div>
         </div>
       </div>

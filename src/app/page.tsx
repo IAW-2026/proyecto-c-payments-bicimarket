@@ -39,16 +39,6 @@ export default async function Home() {
           >
             Iniciar Sesion
           </Link>
-          <Link
-            href="/sign-up"
-            className={buttonVariants({
-              variant: "outline",
-              size: "lg",
-              className: "w-full",
-            })}
-          >
-            Crear Cuenta
-          </Link>
         </CardContent>
       </Card>
     </main>

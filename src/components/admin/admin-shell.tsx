@@ -2,6 +2,7 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { UserButton } from "@clerk/nextjs"
 
 import { Icons, Glyph } from "@/lib/icons"
 import type { ReactNode } from "react"
@@ -42,11 +43,30 @@ function Sidebar({ active }: { active: string }) {
         })}
       </div>
       <div className="sidebar-foot">
-        <span className="avatar">RP</span>
-        <div>
-          <div className="name">Rocco Paoloni</div>
-          <div className="role">admin · payments.bicimarket</div>
-        </div>
+        <UserButton
+          appearance={{
+            elements: {
+              rootBox: { width: "100%" },
+              userButtonBox: {
+                flexDirection: "row-reverse",
+                width: "100%",
+                gap: "10px",
+                padding: "4px",
+              },
+              userButtonOuterIdentifier: {
+                fontSize: "13px",
+                fontWeight: 500,
+                color: "var(--sidebar-foreground)",
+              },
+              userButtonTrigger: {
+                width: "100%",
+                borderRadius: "8px",
+                "&:hover": { background: "var(--sidebar-accent)" },
+              },
+            },
+          }}
+          showName
+        />
       </div>
     </aside>
   )
@@ -64,13 +84,7 @@ function Topbar({ crumbs }: { crumbs: string[] }) {
         ))}
       </div>
       <div className="topbar-spacer" />
-      <div className="search-box">
-        <Icons.Search />
-        <span>Buscar pagos, settlements, sellers…</span>
-        <kbd>⌘K</kbd>
-      </div>
-      <div className="icon-btn"><Icons.Bell /></div>
-      <span className="avatar">RP</span>
+      <UserButton />
     </div>
   )
 }

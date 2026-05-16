@@ -1,9 +1,11 @@
 "use client"
 
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useMemo, useState } from "react"
 
 import { AdminShell } from "@/components/admin/admin-shell"
+import { FilterDropdown } from "@/components/admin/filter-dropdown"
 import { Icons } from "@/lib/icons"
 import { ARS, formatDate } from "@/lib/currency"
 import { useMarkSettlementsPaid, useSettlements } from "@/hooks/use-settlements"
@@ -12,10 +14,20 @@ import type { SettlementFilters } from "@/types/filters"
 function copy(text: string) { navigator.clipboard.writeText(text) }
 
 export default function SettlementsPage() {
+  const router = useRouter()
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [statusFilter, setStatusFilter] = useState<string>("")
+  const [sellerFilter, setSellerFilter] = useState<string>("")
+  const [dateRange, setDateRange] = useState<string>("")
 
-  const filters = useMemo<SettlementFilters>(() => ({ page, limit: 20 }), [page])
+  const filters = useMemo<SettlementFilters>(() => ({
+    page,
+    limit: 20,
+    status: statusFilter || undefined,
+    ...(sellerFilter ? { sellerId: sellerFilter } : {}),
+    ...(dateRange === "month" ? { from: new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString() } : {}),
+  }), [page, statusFilter, sellerFilter, dateRange])
 
   const q = useSettlements(filters)
   const markPaid = useMarkSettlementsPaid()
@@ -72,7 +84,7 @@ export default function SettlementsPage() {
         </div>
         <div className="row gap-2">
           <button className="btn btn-secondary" onClick={exportCsv}><Icons.Download /> Exportar</button>
-          <button className="btn btn-primary"><Icons.Send /> Procesar payouts</button>
+            <button className="btn btn-primary" onClick={() => router.push("/admin/payouts")}><Icons.Send /> Ir a Payouts</button>
         </div>
       </div>
 
@@ -84,12 +96,27 @@ export default function SettlementsPage() {
       </div>
 
       <div className="filterbar">
-        <span className="filter-chip has-value"><Icons.Filter />Estado: <span className="v">todos</span> <Icons.Down /></span>
-        <span className="filter-chip"><Icons.Calendar /><span>Fecha</span><Icons.Down /></span>
+        <FilterDropdown
+          label="Estado"
+          icon={<Icons.Filter />}
+          value={statusFilter}
+          options={[
+            { label: "todos", value: "" },
+            { label: "pending", value: "pending" },
+            { label: "paid", value: "paid" },
+            { label: "failed", value: "failed" },
+            { label: "manual review", value: "manual_review" },
+          ]}
+          onChange={(v) => { setStatusFilter(v); setPage(1) }}
+        />
         <span className="filter-chip"><span>Seller</span><Icons.Down /></span>
         <span style={{ flex: 1 }} />
-        <span className="filter-chip active">Este mes</span>
-        <span className="filter-chip">Mes pasado</span>
+        <span className={`filter-chip ${dateRange === "month" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "month" ? "" : "month"); setPage(1) }}>Este mes</span>
+        {(statusFilter || sellerFilter || dateRange) && (
+          <span className="filter-chip" style={{ color: "var(--destructive)", borderColor: "transparent" }} onClick={() => { setStatusFilter(""); setSellerFilter(""); setDateRange(""); setPage(1) }}>
+            Limpiar filtros
+          </span>
+        )}
       </div>
 
       <div className="card">

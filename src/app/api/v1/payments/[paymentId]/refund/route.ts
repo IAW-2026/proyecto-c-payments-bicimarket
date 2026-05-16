@@ -1,76 +1,113 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { validateServiceTokenSeller } from '@/lib/service-token'
+import { processRefund as mpProcessRefund } from '@/services/mercado-pago.service'
+import { notifyBuyerOrderStatus } from '@/services/inter-app-client.service'
+import { handleRouteError, badRequest, notFound, unauthorized } from '@/lib/errors'
 
-// POST /api/v1/payments/{paymentId}/refund - process refund
 export async function POST(
   req: Request,
   { params }: { params: Promise<{ paymentId: string }> }
 ) {
   try {
-    const { paymentId } = await params
-    
-    // Get payment
-    const payment = await prisma.payment.findUnique({ where: { id: paymentId } })
-    if (!payment) {
-      return NextResponse.json(
-        { error: { code: 'NOT_FOUND', message: 'Payment not found' } },
-        { status: 404 }
-      )
+    const svcToken = req.headers.get('X-Service-Token') || req.headers.get('x-service-token')
+    if (!validateServiceTokenSeller(svcToken)) {
+      return unauthorized('Valid seller service token required')
     }
 
-    // Check if payment is in approved state
+    const { paymentId } = await params
+
+    const payment = await prisma.payment.findUnique({ where: { id: paymentId } })
+    if (!payment) {
+      return notFound('Payment not found', { paymentId })
+    }
+
     if (payment.status !== 'approved') {
-      return NextResponse.json(
-        { error: { code: 'INVALID_STATE', message: `Cannot refund payment in ${payment.status} state` } },
-        { status: 400 }
-      )
+      return badRequest(`Cannot refund payment in ${payment.status} state`, {
+        current_status: payment.status,
+      })
     }
 
     const body = await req.json()
-    const { amount_cents, reason = 'manual' } = body
+    const { amount_cents, reason = 'seller_rejected', seller_profile_id } = body
 
-    // Validate amount
     if (!amount_cents || amount_cents <= 0 || amount_cents > payment.amount_cents) {
-      return NextResponse.json(
-        { error: { code: 'INVALID_AMOUNT', message: `Refund amount must be between 0 and ${payment.amount_cents}` } },
-        { status: 400 }
-      )
+      return badRequest(`Refund amount must be between 0 and ${payment.amount_cents}`, {
+        max_amount: payment.amount_cents,
+      })
     }
 
-    // Check if refund already exists for this amount (prevent duplicates)
-    const existingRefund = await prisma.refund.findFirst({
-      where: { payment_id: paymentId, amount_cents, reason }
-    })
-    if (existingRefund && existingRefund.status === 'approved') {
-      return NextResponse.json({ data: existingRefund }, { status: 200 })
-    }
-
-    // Create refund record
     const refund = await prisma.refund.create({
       data: {
         payment_id: paymentId,
         amount_cents,
-        reason,
-        status: 'pending'
-      }
+        currency: payment.currency,
+        reason: reason as any,
+        seller_profile_id: seller_profile_id || null,
+        status: 'pending',
+      },
     })
 
-    // TODO: Call Mercado Pago API to process refund
-    // const mpResult = await processMercadoPagoRefund(payment.gateway_reference, amount_cents)
-    // await prisma.refund.update({
-    //   where: { id: refund.id },
-    //   data: {
-    //     gateway_reference: mpResult.id,
-    //     status: 'approved'
-    //   }
-    // })
+    if (payment.gateway_reference) {
+      try {
+        const mpResult = await mpProcessRefund(payment.gateway_reference, amount_cents)
 
-    return NextResponse.json({ data: refund }, { status: 201 })
+        await prisma.refund.update({
+          where: { id: refund.id },
+          data: {
+            gateway_reference: mpResult.id,
+            status: mpResult.status === 'approved' ? 'approved' : 'pending',
+          },
+        })
+
+        if (mpResult.status === 'approved') {
+          const totalRefunded = await prisma.refund.aggregate({
+            where: { payment_id: paymentId, status: 'approved' },
+            _sum: { amount_cents: true },
+          })
+          const totalRefundedAmount = totalRefunded._sum.amount_cents || amount_cents
+          const isFullyRefunded = totalRefundedAmount >= payment.amount_cents
+
+          await prisma.$transaction(async (tx) => {
+            if (isFullyRefunded) {
+              await tx.payment.update({
+                where: { id: paymentId },
+                data: { status: 'refunded' },
+              })
+            }
+            await tx.paymentStatusHistory.create({
+              data: {
+                payment_id: paymentId,
+                from_status: 'approved',
+                to_status: isFullyRefunded ? 'refunded' : 'approved',
+                changed_by: 'system',
+                reason: `Refund of ${amount_cents} cents processed via MP (${isFullyRefunded ? 'full' : 'partial'})`,
+              },
+            })
+          })
+
+          try {
+            await notifyBuyerOrderStatus(payment.order_id, 'refunded', payment.id)
+          } catch (notifyErr) {
+            console.error('Failed to notify buyer of refund:', notifyErr)
+          }
+        }
+      } catch (mpErr) {
+        console.error('MP refund failed:', mpErr)
+        await prisma.refund.update({
+          where: { id: refund.id },
+          data: { status: 'failed' },
+        })
+      }
+    }
+
+    const finalRefund = await prisma.refund.findUnique({
+      where: { id: refund.id },
+      include: { payment: { select: { order_id: true, status: true } } },
+    })
+
+    return NextResponse.json({ data: finalRefund }, { status: 201 })
   } catch (err) {
-    console.error('Error processing refund:', err)
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: 'Failed to process refund' } },
-      { status: 500 }
-    )
+    return handleRouteError(err, 'processing refund')
   }
 }

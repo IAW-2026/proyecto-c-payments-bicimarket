@@ -1,91 +1,93 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { validateServiceTokenBuyer } from '@/lib/service-token'
+import { handleRouteError, badRequest, notFound, unauthorized } from '@/lib/errors'
+import { extractIdempotencyKey, checkIdempotency, cacheIdempotencyResponse } from '@/lib/idempotency'
 
-// GET /api/v1/receipts - List receipts
 export async function GET(req: Request) {
   try {
     const url = new URL(req.url)
     const paymentId = url.searchParams.get('paymentId')
+    const from = url.searchParams.get('from')
+    const to = url.searchParams.get('to')
     const page = Number(url.searchParams.get('page')) || 1
     const limit = Math.min(Number(url.searchParams.get('limit')) || 20, 100)
     const skip = (page - 1) * limit
+    const sortBy = url.searchParams.get('sort') || '-created_at'
 
-    const where: any = {}
+    const where: Record<string, unknown> = {}
     if (paymentId) where.payment_id = paymentId
+    if (from || to) {
+      where.issued_at = {} as Record<string, Date>
+      if (from) (where.issued_at as Record<string, Date>).gte = new Date(from)
+      if (to) (where.issued_at as Record<string, Date>).lte = new Date(to)
+    }
+
+    const sortField = sortBy.startsWith('-') ? sortBy.slice(1) : sortBy
+    const sortDir = sortBy.startsWith('-') ? 'desc' as const : 'asc' as const
 
     const [receipts, total] = await Promise.all([
       prisma.receipt.findMany({
-        where,
+        where: where as any,
         take: limit,
         skip,
-        orderBy: { created_at: 'desc' }
+        orderBy: { [sortField]: sortDir } as any,
       }),
-      prisma.receipt.count({ where })
+      prisma.receipt.count({ where: where as any }),
     ])
 
     return NextResponse.json({
       data: receipts,
-      pagination: {
-        page,
-        limit,
-        total,
-        has_more: skip + limit < total
-      }
+      pagination: { page, limit, total, has_more: skip + limit < total, next_cursor: null },
     })
   } catch (err) {
-    console.error('Error listing receipts:', err)
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: 'Failed to list receipts' } },
-      { status: 500 }
-    )
+    return handleRouteError(err, 'listing receipts')
   }
 }
 
-// POST /api/v1/receipts - Create receipt (internal trigger after payment approved)
 export async function POST(req: Request) {
   try {
-    const body = await req.json()
+    const svcToken = req.headers.get('X-Service-Token') || req.headers.get('x-service-token')
+    if (!svcToken || (!validateServiceTokenBuyer(svcToken))) {
+      return unauthorized('Valid service token required')
+    }
 
-    // Validate required fields
+    const idempotencyKey = extractIdempotencyKey(req)
+    if (idempotencyKey) {
+      const cached = await checkIdempotency(idempotencyKey)
+      if (cached.cached) return cached.response
+    }
+
+    const body = await req.json()
     const requiredFields = ['payment_id', 'receipt_number', 'receipt_url', 'amount_cents', 'issued_at']
     for (const field of requiredFields) {
       if (!body[field]) {
-        return NextResponse.json(
-          { error: { code: 'INVALID_PAYLOAD', message: `Missing required field: ${field}` } },
-          { status: 400 }
-        )
+        return badRequest(`Missing required field: ${field}`)
       }
     }
 
-    // Verify payment exists
-    const payment = await prisma.payment.findUnique({
-      where: { id: body.payment_id }
-    })
-
+    const payment = await prisma.payment.findUnique({ where: { id: body.payment_id } })
     if (!payment) {
-      return NextResponse.json(
-        { error: { code: 'NOT_FOUND', message: 'Payment not found', details: { payment_id: body.payment_id } } },
-        { status: 404 }
-      )
+      return notFound('Payment not found', { payment_id: body.payment_id })
     }
 
-    // Create receipt
     const receipt = await prisma.receipt.create({
       data: {
         payment_id: body.payment_id,
         receipt_number: body.receipt_number,
         receipt_url: body.receipt_url,
         amount_cents: body.amount_cents,
-        issued_at: new Date(body.issued_at)
-      }
+        issued_at: new Date(body.issued_at),
+      },
     })
 
-    return NextResponse.json({ data: receipt }, { status: 201 })
+    const response = { data: receipt }
+    if (idempotencyKey) {
+      await cacheIdempotencyResponse(idempotencyKey, response, 201)
+    }
+
+    return NextResponse.json(response, { status: 201 })
   } catch (err) {
-    console.error('Error creating receipt:', err)
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: 'Failed to create receipt' } },
-      { status: 500 }
-    )
+    return handleRouteError(err, 'creating receipt')
   }
 }

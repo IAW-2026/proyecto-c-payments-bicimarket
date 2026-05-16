@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react"
 
 import { AdminShell } from "@/components/admin/admin-shell"
+import { FilterDropdown } from "@/components/admin/filter-dropdown"
 import { Icons } from "@/lib/icons"
 import { ARS, formatDate } from "@/lib/currency"
 import { useCreateRefund, useRefunds } from "@/hooks/use-refunds"
@@ -24,8 +25,17 @@ export default function RefundsPage() {
   const [createPaymentId, setCreatePaymentId] = useState("")
   const [createAmount, setCreateAmount] = useState("")
   const [createReason, setCreateReason] = useState<RefundReason>("manual")
+  const [statusFilter, setStatusFilter] = useState<string>("")
+  const [reasonFilter, setReasonFilter] = useState<string>("")
+  const [dateRange, setDateRange] = useState<string>("")
 
-  const filters = useMemo<RefundFilters>(() => ({ page, limit: 20 }), [page])
+  const filters = useMemo<RefundFilters>(() => ({
+    page,
+    limit: 20,
+    ...(statusFilter ? { status: statusFilter } : {}),
+    ...(reasonFilter ? { reason: reasonFilter } : {}),
+    ...(dateRange === "30d" ? { from: new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10) } : {}),
+  }), [page, statusFilter, reasonFilter, dateRange])
 
   const refundsQuery = useRefunds(filters)
   const createRefund = useCreateRefund()
@@ -71,12 +81,35 @@ export default function RefundsPage() {
         </div>
 
         <div className="filterbar">
-          <span className="filter-chip has-value"><Icons.Filter />Estado: <span className="v">todos</span><Icons.Down /></span>
-          <span className="filter-chip"><span>Motivo</span><Icons.Down /></span>
-          <span className="filter-chip"><Icons.Calendar /><span>Fecha</span><Icons.Down /></span>
-          <span className="filter-chip"><span>Payment ID</span><Icons.Down /></span>
-          <span style={{ flex: 1 }} />
-          <span className="filter-chip active">Últimos 30 días</span>
+          <FilterDropdown
+            label="Estado"
+            value={statusFilter}
+            options={[
+              { label: "todos", value: "" },
+              { label: "pending", value: "pending" },
+              { label: "approved", value: "approved" },
+              { label: "failed", value: "failed" },
+            ]}
+            onChange={(v) => { setStatusFilter(v); setPage(1) }}
+          />
+          <FilterDropdown
+            label="Motivo"
+            value={reasonFilter}
+            options={[
+              { label: "todos", value: "" },
+              { label: "Manual (admin)", value: "manual" },
+              { label: "Seller rechazó", value: "seller_rejected" },
+              { label: "Comprador canceló", value: "buyer_cancelled" },
+              { label: "No entregado", value: "not_delivered" },
+            ]}
+            onChange={(v) => { setReasonFilter(v); setPage(1) }}
+          />
+          <span className={`filter-chip ${dateRange === "30d" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "30d" ? "" : "30d"); setPage(1) }}>Últimos 30 días</span>
+          {(statusFilter || reasonFilter || dateRange) && (
+            <span className="filter-chip" style={{ color: "var(--destructive)", borderColor: "transparent" }} onClick={() => { setStatusFilter(""); setReasonFilter(""); setDateRange(""); setPage(1) }}>
+              Limpiar filtros
+            </span>
+          )}
         </div>
 
         <div className="card">
