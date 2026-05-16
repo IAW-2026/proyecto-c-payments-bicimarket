@@ -3,14 +3,17 @@
 import { useMemo, useState } from "react"
 
 import { AdminShell } from "@/components/admin/admin-shell"
+import { Paginator } from "@/components/admin/paginator"
 import { Icons } from "@/lib/icons"
 import { ARS, formatDate } from "@/lib/currency"
 import { usePayouts } from "@/hooks/use-settlements"
+import { useToast } from "@/hooks/use-toast"
 import type { PayoutFilters } from "@/types/filters"
 
 function copy(text: string) { navigator.clipboard.writeText(text) }
 
 export default function PayoutsPage() {
+  const { toast } = useToast()
   const [page, setPage] = useState(1)
   const [tab, setTab] = useState("queue")
 
@@ -38,6 +41,11 @@ export default function PayoutsPage() {
     return { pending: scheduled.length, pendingAmount, inProgress: inProgress.length, inProgressAmount }
   }, [payouts, scheduled.length, inProgress.length])
 
+  const handleCopy = (text: string) => {
+    copy(text)
+    toast({ description: "ID copiado al portapapeles" })
+  }
+
   const exportCsv = () => {
     const header = ["id", "settlement_id", "status", "created_at"].join(",")
     const rows = payouts.map((p) =>
@@ -52,12 +60,14 @@ export default function PayoutsPage() {
 
   return (
     <AdminShell active="payouts" crumbs={["Admin", "Payouts"]}>
-      <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-end", marginBottom: 20 }}>
+      <div className="page-header">
         <div>
           <h1 className="page-title">Payouts</h1>
           <p className="page-sub">Registro de payouts generados. Finanzas los procesa externamente contra Mercado Pago.</p>
         </div>
-        <div className="row gap-2" />
+        <div className="btn-group">
+          <button className="btn btn-secondary" onClick={exportCsv}><Icons.Download /> Exportar</button>
+        </div>
       </div>
 
       <div className="grid-4 gap-4" style={{ marginBottom: 16 }}>
@@ -77,55 +87,52 @@ export default function PayoutsPage() {
         <div className="card-head" style={{ justifyContent: "space-between" }}>
           <h2 className="sec-title">{tab === "attention" ? "Fallidos" : tab === "history" ? "Completados" : "Cola de pagos"}</h2>
         </div>
-        <table className="t">
-          <thead>
-            <tr>
-              <th className="checkbox-cell"><span className="cb" /></th>
-              <th>Payout ID</th>
-              <th>Settlement</th>
-              <th>Status</th>
-              <th className="num">Monto</th>
-              <th className="actions-cell"></th>
-            </tr>
-          </thead>
-          <tbody>
-              {payoutsQuery.isLoading ? (
-                <tr><td colSpan={6}>{[0, 1, 2].map((i) => <div key={i} className="sk" style={{ width: "100%", height: 20, margin: 8 }} />)}</td></tr>
-              ) : displayedPayouts.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="empty">
-                    <div className="icon-wrap"><Icons.Send /></div>
-                    <div className="t">No hay payouts</div>
-                    <div className="s">Los payouts aparecen cuando los settlements se generan.</div>
-                  </td>
-                </tr>
-              ) : (
-                displayedPayouts.map((p) => (
-                <tr key={p.id}>
-                  <td className="checkbox-cell"><span className="cb" /></td>
-                  <td className="id"><span className="row-link">{p.id}</span></td>
-                  <td className="id">{p.settlement_id.slice(0, 14)}…</td>
-                  <td><span className={`badge ${p.status}`}><span className="dot" />{p.status}</span></td>
-                  <td className="num tnum" style={{ fontWeight: 500 }}>{ARS(p.settlement?.gross_amount_cents ?? 0)}</td>
-                  <td className="actions-cell"><span className="icon-btn" onClick={() => copy(p.id)} title="Copiar ID"><Icons.Copy /></span></td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-        <div className="paginator">
-          <div className="row gap-3">
-            <span>Mostrando <span className="tnum">1–{displayedPayouts.length}</span> de <span className="tnum">{displayedPayouts.length}</span></span>
-          </div>
-          <div className="page-arrows">
-            <button className="btn btn-secondary btn-sm" disabled={page <= 1} onClick={() => setPage((c) => Math.max(1, c - 1))}>
-              <Icons.Chevron style={{ transform: "rotate(180deg)" }} /> Anterior
-            </button>
-            <button className="btn btn-secondary btn-sm" disabled={!pagination.has_more} onClick={() => setPage((c) => c + 1)}>
-              Siguiente <Icons.Chevron />
-            </button>
-          </div>
+        <div className="table-wrapper">
+          <table className="t">
+            <thead>
+              <tr>
+                <th className="checkbox-cell"><span className="cb" /></th>
+                <th>Payout ID</th>
+                <th>Settlement</th>
+                <th>Status</th>
+                <th className="num">Monto</th>
+                <th className="actions-cell"></th>
+              </tr>
+            </thead>
+            <tbody>
+                {payoutsQuery.isLoading ? (
+                  <tr><td colSpan={6}>{[0, 1, 2].map((i) => <div key={i} className="sk" style={{ width: "100%", height: 20, margin: 8 }} />)}</td></tr>
+                ) : displayedPayouts.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="empty">
+                      <div className="icon-wrap"><Icons.Send /></div>
+                      <div className="t">No hay payouts</div>
+                      <div className="s">Los payouts aparecen cuando los settlements se generan.</div>
+                    </td>
+                  </tr>
+                ) : (
+                  displayedPayouts.map((p) => (
+                  <tr key={p.id}>
+                    <td className="checkbox-cell"><span className="cb" /></td>
+                    <td className="id"><span className="row-link">{p.id}</span></td>
+                    <td className="id">{p.settlement_id.slice(0, 14)}…</td>
+                    <td><span className={`badge ${p.status}`}><span className="dot" />{p.status}</span></td>
+                    <td className="num tnum" style={{ fontWeight: 500 }}>{ARS(p.settlement?.gross_amount_cents ?? 0)}</td>
+                    <td className="actions-cell"><span className="icon-btn" onClick={() => handleCopy(p.id)} title="Copiar ID"><Icons.Copy /></span></td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
         </div>
+        <Paginator
+          page={page}
+          total={displayedPayouts.length}
+          pageSize={20}
+          hasMore={pagination.has_more}
+          onPrev={() => setPage((c) => Math.max(1, c - 1))}
+          onNext={() => setPage((c) => c + 1)}
+        />
       </div>
     </AdminShell>
   )

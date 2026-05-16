@@ -10,11 +10,11 @@ import { ARS, formatDate } from "@/lib/currency"
 import { usePayment, useRefundPayment } from "@/hooks/use-payments"
 import { useRefunds } from "@/hooks/use-refunds"
 import { useSettlements } from "@/hooks/use-settlements"
+import { useToast } from "@/hooks/use-toast"
 import type { Refund } from "@/types/payments"
 
-function copy(text: string) { navigator.clipboard.writeText(text) }
-
 export default function PaymentDetailPage() {
+  const { toast } = useToast()
   const params = useParams<{ id: string }>()
   const router = useRouter()
   const paymentId = Array.isArray(params.id) ? params.id[0] : params.id
@@ -35,6 +35,11 @@ export default function PaymentDetailPage() {
       net: settlementList.reduce((t, s) => t + s.net_amount_cents, 0),
     }
   }, [refunds.data?.data, settlements.data?.data])
+
+  const handleCopy = (text: string) => {
+    navigator.clipboard.writeText(text)
+    toast({ description: "ID copiado al portapapeles" })
+  }
 
   if (payment.isLoading || !payment.data) {
     return (
@@ -60,6 +65,7 @@ export default function PaymentDetailPage() {
     if (!confirm(`¿Reembolsar ${ARS(d.amount_cents)} del pago ${d.id}?`)) return
     await refundPayment.mutateAsync({ paymentId: d.id, amount_cents: d.amount_cents, reason: "manual" })
     router.refresh()
+    toast({ description: "Reembolso iniciado exitosamente" })
   }
 
   const downloadReceipt = () => {
@@ -81,22 +87,22 @@ export default function PaymentDetailPage() {
 
   return (
     <AdminShell active="payments" crumbs={["Admin", "Payments", `${d.id.slice(0, 14)}…`]}>
-      <div className="row" style={{ alignItems: "flex-start", justifyContent: "space-between", marginBottom: 20 }}>
+      <div className="detail-header">
         <div className="col gap-3">
-          <div className="row gap-2">
+          <div className="row gap-2" style={{ flexWrap: "wrap" }}>
             <span className="mono" style={{ fontSize: 13, fontWeight: 500 }}>{d.id}</span>
-            <span className="icon-btn" onClick={() => copy(d.id)} title="Copiar ID"><Icons.Copy /></span>
+            <span className="icon-btn" onClick={() => handleCopy(d.id)} title="Copiar ID"><Icons.Copy /></span>
             <span className={`badge ${d.status} badge-lg`}><span className="dot" />{d.status}</span>
           </div>
-          <h1 className="page-title" style={{ fontSize: 30 }}>{ARS(d.amount_cents)}</h1>
-          <div className="row gap-4 muted" style={{ fontSize: 13 }}>
+          <h1 className="page-title" style={{ fontSize: 30, margin: 0 }}>{ARS(d.amount_cents)}</h1>
+          <div className="row gap-4 muted" style={{ fontSize: 13, flexWrap: "wrap" }}>
             <span>Order <span className="mono" style={{ color: "var(--primary)", fontWeight: 500 }}>{d.order_id.slice(0, 18)}…</span></span>
             <span>·</span>
             <span>Iniciado {formatDate(d.created_at)}</span>
             {d.approved_at && <><span>·</span><span>Aprobado {formatDate(d.approved_at)}</span></>}
           </div>
         </div>
-        <div className="row gap-2">
+        <div className="btn-group">
           <button className="btn btn-secondary" onClick={downloadReceipt}><Icons.Download /> Comprobante</button>
           <button className="btn btn-primary" onClick={handleRefund} disabled={refundPayment.isPending}>
             <Icons.Undo /> Reembolsar
@@ -116,63 +122,67 @@ export default function PaymentDetailPage() {
               settlementList.length === 0 ? (
                 <div className="muted" style={{ fontSize: 13 }}>Sin settlements asociados.</div>
               ) : (
-                <table className="t">
-                  <thead>
-                    <tr>
-                      <th>Settlement</th>
-                      <th>Seller</th>
-                      <th className="num">Gross</th>
-                      <th className="num">Fee</th>
-                      <th className="num">Net</th>
-                      <th>Estado</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {settlementList.map((s) => (
-                      <tr key={s.id}>
-                        <td className="id"><Link href={`/admin/settlements/${s.id}`} className="row-link">{s.id.slice(0, 14)}…</Link></td>
-                        <td>{s.seller_profile_id.slice(0, 10)}…</td>
-                        <td className="num tnum">{ARS(s.gross_amount_cents, { bare: true })}</td>
-                        <td className="num tnum muted">−{ARS(s.fee_amount_cents, { bare: true })}</td>
-                        <td className="num tnum" style={{ fontWeight: 500 }}>{ARS(s.net_amount_cents, { bare: true })}</td>
-                        <td><span className={`badge ${s.status}`}><span className="dot" />{s.status}</span></td>
+                <div className="table-wrapper">
+                  <table className="t">
+                    <thead>
+                      <tr>
+                        <th>Settlement</th>
+                        <th>Seller</th>
+                        <th className="num">Gross</th>
+                        <th className="num">Fee</th>
+                        <th className="num">Net</th>
+                        <th>Estado</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {settlementList.map((s) => (
+                        <tr key={s.id}>
+                          <td className="id"><Link href={`/admin/settlements/${s.id}`} className="row-link">{s.id.slice(0, 14)}…</Link></td>
+                          <td>{s.seller_profile_id.slice(0, 10)}…</td>
+                          <td className="num tnum">{ARS(s.gross_amount_cents, { bare: true })}</td>
+                          <td className="num tnum muted">−{ARS(s.fee_amount_cents, { bare: true })}</td>
+                          <td className="num tnum" style={{ fontWeight: 500 }}>{ARS(s.net_amount_cents, { bare: true })}</td>
+                          <td><span className={`badge ${s.status}`}><span className="dot" />{s.status}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )
             ) : refundList.length === 0 ? (
               <div className="muted" style={{ fontSize: 13 }}>Sin refunds asociados.</div>
             ) : (
-              <table className="t">
-                <thead>
-                  <tr>
-                    <th>Refund</th>
-                    <th className="num">Monto</th>
-                    <th>Motivo</th>
-                    <th>Estado</th>
-                    <th>Creado</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {refundList.map((r) => (
-                    <tr key={r.id}>
-                      <td className="id"><span className="mono" style={{ fontSize: 12 }}>{r.id}</span></td>
-                      <td className="num tnum">{ARS(r.amount_cents)}</td>
-                      <td><span className="tag">{r.reason}</span></td>
-                      <td><span className={`badge ${r.status}`}><span className="dot" />{r.status}</span></td>
-                      <td className="muted" style={{ fontSize: 12 }}>{formatDate(r.created_at)}</td>
+              <div className="table-wrapper">
+                <table className="t">
+                  <thead>
+                    <tr>
+                      <th>Refund</th>
+                      <th className="num">Monto</th>
+                      <th>Motivo</th>
+                      <th>Estado</th>
+                      <th>Creado</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {refundList.map((r) => (
+                      <tr key={r.id}>
+                        <td className="id"><span className="mono" style={{ fontSize: 12 }}>{r.id}</span></td>
+                        <td className="num tnum">{ARS(r.amount_cents)}</td>
+                        <td><span className="tag">{r.reason}</span></td>
+                        <td><span className={`badge ${r.status}`}><span className="dot" />{r.status}</span></td>
+                        <td className="muted" style={{ fontSize: 12 }}>{formatDate(r.created_at)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
         </div>
       )}
 
       {activeTab === "overview" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 16 }}>
+        <div className="detail-grid">
           <div className="col gap-4">
             <div className="card">
               <div className="card-head"><h2 className="sec-title">Desglose del cobro</h2></div>
@@ -192,30 +202,32 @@ export default function PaymentDetailPage() {
               {settlementList.length === 0 ? (
                 <div className="card-body muted" style={{ fontSize: 13 }}>Sin settlements asociados.</div>
               ) : (
-                <table className="t">
-                  <thead>
-                    <tr>
-                      <th>Settlement</th>
-                      <th>Seller</th>
-                      <th className="num">Gross</th>
-                      <th className="num">Fee</th>
-                      <th className="num">Net</th>
-                      <th>Estado</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {settlementList.map((s) => (
-                      <tr key={s.id}>
-                        <td className="id"><Link href={`/admin/settlements/${s.id}`} className="row-link">{s.id.slice(0, 14)}…</Link></td>
-                        <td>{s.seller_profile_id.slice(0, 10)}…</td>
-                        <td className="num tnum">{ARS(s.gross_amount_cents, { bare: true })}</td>
-                        <td className="num tnum muted">−{ARS(s.fee_amount_cents, { bare: true })}</td>
-                        <td className="num tnum" style={{ fontWeight: 500 }}>{ARS(s.net_amount_cents, { bare: true })}</td>
-                        <td><span className={`badge ${s.status}`}><span className="dot" />{s.status}</span></td>
+                <div className="table-wrapper">
+                  <table className="t">
+                    <thead>
+                      <tr>
+                        <th>Settlement</th>
+                        <th>Seller</th>
+                        <th className="num">Gross</th>
+                        <th className="num">Fee</th>
+                        <th className="num">Net</th>
+                        <th>Estado</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {settlementList.map((s) => (
+                        <tr key={s.id}>
+                          <td className="id"><Link href={`/admin/settlements/${s.id}`} className="row-link">{s.id.slice(0, 14)}…</Link></td>
+                          <td>{s.seller_profile_id.slice(0, 10)}…</td>
+                          <td className="num tnum">{ARS(s.gross_amount_cents, { bare: true })}</td>
+                          <td className="num tnum muted">−{ARS(s.fee_amount_cents, { bare: true })}</td>
+                          <td className="num tnum" style={{ fontWeight: 500 }}>{ARS(s.net_amount_cents, { bare: true })}</td>
+                          <td><span className={`badge ${s.status}`}><span className="dot" />{s.status}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
           </div>

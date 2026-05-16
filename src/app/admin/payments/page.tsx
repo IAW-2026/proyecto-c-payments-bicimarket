@@ -5,14 +5,17 @@ import { useMemo, useState } from "react"
 
 import { AdminShell } from "@/components/admin/admin-shell"
 import { FilterDropdown } from "@/components/admin/filter-dropdown"
+import { Paginator } from "@/components/admin/paginator"
 import { Icons } from "@/lib/icons"
 import { ARS, formatDate } from "@/lib/currency"
 import { usePayments } from "@/hooks/use-payments"
+import { useToast } from "@/hooks/use-toast"
 import type { PaymentFilters } from "@/types/filters"
 
 function copy(text: string) { navigator.clipboard.writeText(text) }
 
 export default function PaymentsPage() {
+  const { toast } = useToast()
   const [page, setPage] = useState(1)
   const [statusFilter, setStatusFilter] = useState<string>("")
   const [quickFilter, setQuickFilter] = useState("7d")
@@ -50,6 +53,11 @@ export default function PaymentsPage() {
 
   const selectedTotal = payments.filter((p) => selected.has(p.id)).reduce((a, b) => a + b.amount_cents, 0)
 
+  const handleCopy = (text: string) => {
+    copy(text)
+    toast({ description: "ID copiado al portapapeles" })
+  }
+
   const exportCsv = () => {
     const header = ["id", "order_id", "buyer_profile_id", "amount_cents", "status", "created_at"].join(",")
     const rows = payments.map((p) =>
@@ -74,12 +82,12 @@ export default function PaymentsPage() {
 
   return (
     <AdminShell active="payments" crumbs={["Admin", "Payments"]}>
-      <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-end", marginBottom: 20 }}>
+      <div className="page-header">
         <div>
           <h1 className="page-title">Payments</h1>
           <p className="page-sub">Todos los cobros iniciados desde Buyer App. El estado real se resuelve vía Mercado Pago.</p>
         </div>
-        <div className="row gap-2">
+        <div className="btn-group">
           <button className="btn btn-secondary" onClick={exportCsv}><Icons.Download /> Exportar CSV</button>
         </div>
       </div>
@@ -103,7 +111,7 @@ export default function PaymentsPage() {
       </div>
 
       <div className="card">
-        <div style={{ maxHeight: 520, overflow: "auto" }}>
+        <div className="table-wrapper">
           <table className="t">
             <thead>
               <tr>
@@ -151,7 +159,7 @@ export default function PaymentsPage() {
                     <td className="muted mono" style={{ fontSize: 12 }}>{formatDate(p.created_at)}</td>
                     <td className="id">{p.gateway_reference?.slice(0, 14) ?? <span className="muted">—</span>}…</td>
                     <td className="actions-cell">
-                      <span className="icon-btn" onClick={() => copy(p.id)} title="Copiar ID"><Icons.Copy /></span>
+                      <span className="icon-btn" onClick={() => handleCopy(p.id)} title="Copiar ID"><Icons.Copy /></span>
                     </td>
                   </tr>
                 ))
@@ -159,23 +167,18 @@ export default function PaymentsPage() {
             </tbody>
           </table>
         </div>
-        <div className="paginator">
-          <div className="row gap-3">
-            <span>Mostrando <span className="tnum">1–{payments.length}</span> de <span className="tnum">{pagination.total}</span></span>
-          </div>
-          <div className="page-arrows">
-            <button className="btn btn-secondary btn-sm" disabled={page <= 1} onClick={() => setPage((c) => Math.max(1, c - 1))}>
-              <Icons.Chevron style={{ transform: "rotate(180deg)" }} /> Anterior
-            </button>
-            <button className="btn btn-secondary btn-sm" disabled={!pagination.has_more} onClick={() => setPage((c) => c + 1)}>
-              Siguiente <Icons.Chevron />
-            </button>
-          </div>
-        </div>
+        <Paginator
+          page={page}
+          total={pagination.total}
+          pageSize={20}
+          hasMore={pagination.has_more}
+          onPrev={() => setPage((c) => Math.max(1, c - 1))}
+          onNext={() => setPage((c) => c + 1)}
+        />
       </div>
 
       {selected.size > 0 && (
-        <div className="row gap-3 muted" style={{ marginTop: 14, fontSize: 12.5 }}>
+        <div className="row gap-3 muted" style={{ marginTop: 14, fontSize: 12.5, flexWrap: "wrap" }}>
           <span>{selected.size} seleccionados</span>
           <span>·</span>
           <span>Total seleccionado: <span className="tnum" style={{ color: "var(--foreground)", fontWeight: 600 }}>{ARS(selectedTotal)}</span></span>

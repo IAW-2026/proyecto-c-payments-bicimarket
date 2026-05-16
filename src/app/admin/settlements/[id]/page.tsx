@@ -7,14 +7,19 @@ import { AdminShell } from "@/components/admin/admin-shell"
 import { Icons } from "@/lib/icons"
 import { ARS, formatDate } from "@/lib/currency"
 import { useSettlement } from "@/hooks/use-settlements"
-
-function copy(text: string) { navigator.clipboard.writeText(text) }
+import { useToast } from "@/hooks/use-toast"
 
 export default function SettlementDetailPage() {
+  const { toast } = useToast()
   const params = useParams<{ id: string }>()
   const settlementId = Array.isArray(params.id) ? params.id[0] : params.id
 
   const settlement = useSettlement(settlementId)
+
+  const handleCopy = (text: string) => {
+    navigator.clipboard.writeText(text)
+    toast({ description: "ID copiado al portapapeles" })
+  }
 
   const downloadReport = () => {
     if (!settlement.data) return
@@ -58,29 +63,29 @@ export default function SettlementDetailPage() {
 
   return (
     <AdminShell active="settlements" crumbs={["Admin", "Settlements", `${d.id.slice(0, 14)}…`]}>
-      <div className="row" style={{ alignItems: "flex-start", justifyContent: "space-between", marginBottom: 20 }}>
+      <div className="detail-header">
         <div className="col gap-3">
-          <div className="row gap-2">
+          <div className="row gap-2" style={{ flexWrap: "wrap" }}>
             <span className="mono" style={{ fontSize: 13, fontWeight: 500 }}>{d.id}</span>
-            <span className="icon-btn" onClick={() => copy(d.id)} title="Copiar ID"><Icons.Copy /></span>
+            <span className="icon-btn" onClick={() => handleCopy(d.id)} title="Copiar ID"><Icons.Copy /></span>
             <span className={`badge ${d.status} badge-lg`}><span className="dot" />{d.status}</span>
           </div>
-          <div className="row gap-3" style={{ alignItems: "baseline" }}>
+          <div className="row gap-3" style={{ alignItems: "baseline", flexWrap: "wrap" }}>
             <h1 className="page-title" style={{ fontSize: 30, margin: 0 }}>{ARS(d.net_amount_cents)}</h1>
             <span className="muted" style={{ fontSize: 14 }}>Net a pagar al seller</span>
           </div>
-          <div className="row gap-4 muted" style={{ fontSize: 13 }}>
+          <div className="row gap-4 muted" style={{ fontSize: 13, flexWrap: "wrap" }}>
             <span>Payment <Link href={`/admin/payments/${d.payment_id}`} className="mono" style={{ color: "var(--primary)", fontWeight: 500 }}>{d.payment_id.slice(0, 18)}… →</Link></span>
             <span>·</span>
             <span>Seller <span className="mono" style={{ color: "var(--primary)", fontWeight: 500 }}>{d.seller_profile_id} →</span></span>
           </div>
         </div>
-        <div className="row gap-2">
+        <div className="btn-group">
           <button className="btn btn-secondary" onClick={downloadReport}><Icons.Download /> Reporte</button>
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 16 }}>
+      <div className="detail-grid">
         <div className="col gap-4">
           <div className="card">
             <div className="card-head"><h2 className="sec-title">Cálculo del settlement</h2></div>
@@ -102,7 +107,7 @@ export default function SettlementDetailPage() {
                 <div style={{ width: `${netPct}%`, background: "oklch(0.50 0.155 168)" }} />
                 <div style={{ width: `${feePct}%`, background: "oklch(0.55 0.18 25)" }} />
               </div>
-              <div className="row gap-3" style={{ fontSize: 12, marginTop: 4 }}>
+              <div className="row gap-3" style={{ fontSize: 12, marginTop: 4, flexWrap: "wrap" }}>
                 <span className="row gap-2"><span style={{ width: 8, height: 8, borderRadius: 2, background: "oklch(0.50 0.155 168)" }} /><span className="muted">Net del seller {netPct}%</span></span>
                 <span className="row gap-2"><span style={{ width: 8, height: 8, borderRadius: 2, background: "oklch(0.55 0.18 25)" }} /><span className="muted">Comisión {feePct}%</span></span>
               </div>

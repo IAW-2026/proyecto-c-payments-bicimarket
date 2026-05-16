@@ -4,6 +4,7 @@ import Link from "next/link"
 import { useMemo } from "react"
 
 import { AdminShell } from "@/components/admin/admin-shell"
+import { Delta } from "@/components/admin/delta"
 import { Icons } from "@/lib/icons"
 import { ARS, formatDate } from "@/lib/currency"
 import { usePayments } from "@/hooks/use-payments"
@@ -91,20 +92,9 @@ export default function AdminDashboardPage() {
       failedCount,
 
       countPct: countChange.pct,
-      countDir: countChange.pct >= 0 ? "up" : "down",
-      countIcon: countChange.pct >= 0 ? Icons.Trend : Icons.TrendDown,
-
       volPct: volumeChange.pct,
-      volDir: volumeChange.pct >= 0 ? "up" : "down",
-      volIcon: volumeChange.pct >= 0 ? Icons.Trend : Icons.TrendDown,
-
       pendingDiff: pendingChange.abs,
-      pendingDir: pendingChange.abs <= 0 ? "down" : "up",
-      pendingIcon: pendingChange.abs <= 0 ? Icons.TrendDown : Icons.Trend,
-
       failedDiff: failedChange.abs,
-      failedDir: failedChange.abs <= 0 ? "down" : "up",
-      failedIcon: failedChange.abs <= 0 ? Icons.TrendDown : Icons.Trend,
 
       countSpark: bucketData(pList, (p) => p.created_at, () => 1),
       volSpark: bucketData(pList, (p) => p.created_at, (p) => p.amount_cents),
@@ -124,12 +114,12 @@ export default function AdminDashboardPage() {
 
   return (
     <AdminShell active="dashboard" crumbs={["Admin", "Dashboard"]}>
-      <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-end", marginBottom: 20 }}>
+      <div className="page-header">
         <div>
           <h1 className="page-title">Payments Dashboard</h1>
           <p className="page-sub">Resumen operativo de los últimos pagos y liquidaciones.</p>
         </div>
-        <div className="row gap-2">
+        <div className="btn-group">
           <button className="btn btn-secondary"><Icons.Calendar /> Últimos 30 días</button>
           <button className="btn btn-secondary"><Icons.Download /> Exportar</button>
         </div>
@@ -140,9 +130,7 @@ export default function AdminDashboardPage() {
           <div className="label">Pagos procesados</div>
           <div className="v tnum">{kpis.totalPayments}</div>
           <div className="row" style={{ justifyContent: "space-between" }}>
-            <span className={`delta ${kpis.countDir}`}>
-              <kpis.countIcon />{kpis.countPct >= 0 ? "+" : ""}{kpis.countPct.toFixed(1)}%
-            </span>
+            <Delta value={kpis.countPct} type="pct" />
             <Spark data={kpis.countSpark} />
           </div>
         </div>
@@ -150,9 +138,7 @@ export default function AdminDashboardPage() {
           <div className="label">Volumen transaccionado</div>
           <div className="v tnum">{kpis.totalVolumeFormatted}</div>
           <div className="row" style={{ justifyContent: "space-between" }}>
-            <span className={`delta ${kpis.volDir}`}>
-              <kpis.volIcon />{kpis.volPct >= 0 ? "+" : ""}{kpis.volPct.toFixed(1)}%
-            </span>
+            <Delta value={kpis.volPct} type="pct" />
             <Spark data={kpis.volSpark} color="oklch(0.50 0.155 168)" />
           </div>
         </div>
@@ -160,9 +146,7 @@ export default function AdminDashboardPage() {
           <div className="label">Settlements pendientes</div>
           <div className="v tnum">{kpis.pendingSettlements}</div>
           <div className="row" style={{ justifyContent: "space-between" }}>
-            <span className={`delta ${kpis.pendingDir}`}>
-              <kpis.pendingIcon />{kpis.pendingDiff >= 0 ? "+" : ""}{kpis.pendingDiff}
-            </span>
+            <Delta value={kpis.pendingDiff} type="abs" />
             <Spark data={kpis.pendingSpark} color="oklch(0.65 0.13 168)" />
           </div>
         </div>
@@ -170,9 +154,7 @@ export default function AdminDashboardPage() {
           <div className="label">Transacciones fallidas</div>
           <div className="v tnum">{kpis.failedCount}</div>
           <div className="row" style={{ justifyContent: "space-between" }}>
-            <span className={`delta ${kpis.failedDir}`}>
-              <kpis.failedIcon />{kpis.failedDiff >= 0 ? "+" : ""}{kpis.failedDiff}
-            </span>
+            <Delta value={kpis.failedDiff} type="abs" />
             <Spark data={kpis.failedSpark} color="oklch(0.55 0.18 25)" />
           </div>
         </div>
@@ -187,35 +169,37 @@ export default function AdminDashboardPage() {
             </div>
             <Link href="/admin/payments" className="btn btn-ghost btn-sm"><Icons.Chevron /> Ver todos</Link>
           </div>
-          <table className="t">
-            <thead>
-              <tr>
-                <th>Payment</th>
-                <th className="num">Monto</th>
-                <th>Estado</th>
-                <th style={{ textAlign: "right" }}>Fecha</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentPayments.length === 0 ? (
-                <tr><td colSpan={4} className="empty"><div className="t">Sin pagos aún</div></td></tr>
-              ) : (
-                recentPayments.map((p) => (
-                  <tr key={p.id}>
-                    <td>
-                      <div className="col">
-                        <span className="mono" style={{ fontSize: 12.5, fontWeight: 500 }}>{p.id.slice(0, 14)}…</span>
-                        <span className="muted mono" style={{ fontSize: 11 }}>{p.order_id.slice(0, 14)}…</span>
-                      </div>
-                    </td>
-                    <td className="num tnum" style={{ fontWeight: 500 }}>{ARS(p.amount_cents)}</td>
-                    <td><span className={`badge ${p.status}`}><span className="dot" />{p.status}</span></td>
-                    <td style={{ textAlign: "right" }} className="muted">{formatDate(p.created_at)}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+          <div className="table-wrapper">
+            <table className="t">
+              <thead>
+                <tr>
+                  <th>Payment</th>
+                  <th className="num">Monto</th>
+                  <th>Estado</th>
+                  <th style={{ textAlign: "right" }}>Fecha</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentPayments.length === 0 ? (
+                  <tr><td colSpan={4} className="empty"><div className="t">Sin pagos aún</div></td></tr>
+                ) : (
+                  recentPayments.map((p) => (
+                    <tr key={p.id}>
+                      <td>
+                        <div className="col">
+                          <span className="mono" style={{ fontSize: 12.5, fontWeight: 500 }}>{p.id.slice(0, 14)}…</span>
+                          <span className="muted mono" style={{ fontSize: 11 }}>{p.order_id.slice(0, 14)}…</span>
+                        </div>
+                      </td>
+                      <td className="num tnum" style={{ fontWeight: 500 }}>{ARS(p.amount_cents)}</td>
+                      <td><span className={`badge ${p.status}`}><span className="dot" />{p.status}</span></td>
+                      <td style={{ textAlign: "right" }} className="muted">{formatDate(p.created_at)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <div className="card">
@@ -226,37 +210,39 @@ export default function AdminDashboardPage() {
             </div>
             <Link href="/admin/settlements" className="btn btn-ghost btn-sm"><Icons.Chevron /> Ver todos</Link>
           </div>
-          <table className="t">
-            <thead>
-              <tr>
-                <th>Seller</th>
-                <th className="num">Gross</th>
-                <th className="num">Fee</th>
-                <th className="num">Net</th>
-                <th>Estado</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentSettlements.length === 0 ? (
-                <tr><td colSpan={5} className="empty"><div className="t">Sin settlements aún</div></td></tr>
-              ) : (
-                recentSettlements.map((s) => (
-                  <tr key={s.id}>
-                    <td>
-                      <div className="col">
-                        <span style={{ fontWeight: 500 }}>{s.seller_profile_id.slice(0, 10)}…</span>
-                        <span className="muted mono" style={{ fontSize: 11 }}>{s.id.slice(0, 14)}…</span>
-                      </div>
-                    </td>
-                    <td className="num tnum">{ARS(s.gross_amount_cents, { bare: true })}</td>
-                    <td className="num tnum muted">−{ARS(s.fee_amount_cents, { bare: true })}</td>
-                    <td className="num tnum" style={{ fontWeight: 500 }}>{ARS(s.net_amount_cents, { bare: true })}</td>
-                    <td><span className={`badge ${s.status}`}><span className="dot" />{s.status}</span></td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+          <div className="table-wrapper">
+            <table className="t">
+              <thead>
+                <tr>
+                  <th>Seller</th>
+                  <th className="num">Gross</th>
+                  <th className="num">Fee</th>
+                  <th className="num">Net</th>
+                  <th>Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recentSettlements.length === 0 ? (
+                  <tr><td colSpan={5} className="empty"><div className="t">Sin settlements aún</div></td></tr>
+                ) : (
+                  recentSettlements.map((s) => (
+                    <tr key={s.id}>
+                      <td>
+                        <div className="col">
+                          <span style={{ fontWeight: 500 }}>{s.seller_profile_id.slice(0, 10)}…</span>
+                          <span className="muted mono" style={{ fontSize: 11 }}>{s.id.slice(0, 14)}…</span>
+                        </div>
+                      </td>
+                      <td className="num tnum">{ARS(s.gross_amount_cents, { bare: true })}</td>
+                      <td className="num tnum muted">−{ARS(s.fee_amount_cents, { bare: true })}</td>
+                      <td className="num tnum" style={{ fontWeight: 500 }}>{ARS(s.net_amount_cents, { bare: true })}</td>
+                      <td><span className={`badge ${s.status}`}><span className="dot" />{s.status}</span></td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </AdminShell>

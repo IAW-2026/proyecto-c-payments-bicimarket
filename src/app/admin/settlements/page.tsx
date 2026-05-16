@@ -6,14 +6,17 @@ import { useMemo, useState } from "react"
 
 import { AdminShell } from "@/components/admin/admin-shell"
 import { FilterDropdown } from "@/components/admin/filter-dropdown"
+import { Paginator } from "@/components/admin/paginator"
 import { Icons } from "@/lib/icons"
 import { ARS, formatDate } from "@/lib/currency"
 import { useMarkSettlementsPaid, useSettlements } from "@/hooks/use-settlements"
+import { useToast } from "@/hooks/use-toast"
 import type { SettlementFilters } from "@/types/filters"
 
 function copy(text: string) { navigator.clipboard.writeText(text) }
 
 export default function SettlementsPage() {
+  const { toast } = useToast()
   const router = useRouter()
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -61,6 +64,12 @@ export default function SettlementsPage() {
     if (!confirm(`¿Marcar ${selected.size} settlements como pagados?`)) return
     await markPaid.mutateAsync(Array.from(selected))
     setSelected(new Set())
+    toast({ description: `${selected.size} settlements marcados como pagados` })
+  }
+
+  const handleCopy = (text: string) => {
+    copy(text)
+    toast({ description: "ID copiado al portapapeles" })
   }
 
   const exportCsv = () => {
@@ -77,14 +86,14 @@ export default function SettlementsPage() {
 
   return (
     <AdminShell active="settlements" crumbs={["Admin", "Settlements"]}>
-      <div className="row" style={{ justifyContent: "space-between", alignItems: "flex-end", marginBottom: 20 }}>
+      <div className="page-header">
         <div>
           <h1 className="page-title">Settlements</h1>
           <p className="page-sub">Liquidaciones por vendedor. Se generan al confirmar entrega.</p>
         </div>
-        <div className="row gap-2">
+        <div className="btn-group">
           <button className="btn btn-secondary" onClick={exportCsv}><Icons.Download /> Exportar</button>
-            <button className="btn btn-primary" onClick={() => router.push("/admin/payouts")}><Icons.Send /> Ir a Payouts</button>
+          <button className="btn btn-primary" onClick={() => router.push("/admin/payouts")}><Icons.Send /> Ir a Payouts</button>
         </div>
       </div>
 
@@ -120,7 +129,7 @@ export default function SettlementsPage() {
       </div>
 
       <div className="card">
-        <div style={{ maxHeight: 480, overflow: "auto" }}>
+        <div className="table-wrapper">
           <table className="t">
             <thead>
               <tr>
@@ -168,7 +177,7 @@ export default function SettlementsPage() {
                     <td><span className={`badge ${s.status}`}><span className="dot" />{s.status}</span></td>
                     <td className="muted mono" style={{ fontSize: 12 }}>{formatDate(s.created_at)}</td>
                     <td className="actions-cell">
-                      <span className="icon-btn" onClick={() => copy(s.id)} title="Copiar ID"><Icons.Copy /></span>
+                      <span className="icon-btn" onClick={() => handleCopy(s.id)} title="Copiar ID"><Icons.Copy /></span>
                     </td>
                   </tr>
                 ))
