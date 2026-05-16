@@ -53,6 +53,7 @@ export const Icons = {
   Info: createIcon('circle 12 12 9|M12 8h.01|M11 12h1v5h1', '0 0 24 24'),
   Bike: createIcon('circle 6 17 3.5|circle 18 17 3.5|M6 17 11 6h3l3 5h-7|M14 6h3'),
   Menu: createIcon('M4 6h16|M4 12h16|M4 18h16'),
+  Close: createIcon('M18 6 6 18|M6 6l12 12'),
   Logout: createIcon('M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4|M16 17l5-5-5-5|M21 12H9'),
   Lock: createIcon('rect 3 11 18 11 2|M7 11V7a5 5 0 0 1 10 0v4'),
   Cog: createIcon('circle 12 12 3|M19 12h2|M3 12h2|M12 3v2|M12 19v2|M5.6 5.6l1.4 1.4|M17 17l1.4 1.4|M5.6 18.4 7 17|M17 7l1.4-1.4'),

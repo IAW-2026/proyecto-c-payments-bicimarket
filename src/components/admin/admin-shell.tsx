@@ -1,13 +1,15 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
 import { UserButton } from "@clerk/nextjs"
 import { useState, useEffect, useCallback } from "react"
 
 import { Icons, Glyph } from "@/lib/icons"
-import { useIsMobile } from "@/hooks/use-mobile"
 import type { ReactNode } from "react"
+
+// Module-level state — persists across AdminShell mount/unmount on page navigation
+let _sidebarOpen = false
+let _firstVisit = true
 
 const navItems = [
   { key: "dashboard", label: "Dashboard", href: "/admin", icon: Icons.Home },
@@ -39,7 +41,7 @@ function Sidebar({ active, open, onClose }: { active: string; open: boolean; onC
                 key={item.key}
                 href={item.href}
                 className={`nav-item ${active === item.key ? "active" : ""}`}
-                onClick={onClose}
+                onClick={() => { if (matchMedia('(max-width: 767px)').matches) onClose() }}
               >
                 <span className="nav-icon"><Icon /></span>
                 <span>{item.label}</span>
@@ -53,7 +55,7 @@ function Sidebar({ active, open, onClose }: { active: string; open: boolean; onC
               elements: {
                 rootBox: { width: "100%" },
                 userButtonBox: {
-                  flexDirection: "row-reverse",
+                  flexDirection: "row",
                   width: "100%",
                   gap: "10px",
                   padding: "4px",
@@ -78,11 +80,11 @@ function Sidebar({ active, open, onClose }: { active: string; open: boolean; onC
   )
 }
 
-function Topbar({ crumbs, onMenuClick }: { crumbs: string[]; onMenuClick: () => void }) {
+function Topbar({ crumbs, onMenuClick, sidebarOpen }: { crumbs: string[]; onMenuClick: () => void; sidebarOpen: boolean }) {
   return (
     <div className="topbar">
-      <button className="hamburger icon-btn" onClick={onMenuClick} aria-label="Abrir menú de navegación">
-        <Icons.Menu />
+      <button className={`hamburger icon-btn${sidebarOpen ? " is-active" : ""}`} onClick={onMenuClick} aria-label={sidebarOpen ? "Cerrar menú de navegación" : "Abrir menú de navegación"}>
+        <span className="hamburger-icon">{sidebarOpen ? <Icons.Close /> : <Icons.Menu />}</span>
       </button>
       <div className="crumbs">
         {crumbs.map((c, i) => (
@@ -107,23 +109,29 @@ export function AdminShell({
   crumbs?: string[]
   children: ReactNode
 }) {
-  const pathname = usePathname()
-  const isMobile = useIsMobile()
-  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(_firstVisit ? false : _sidebarOpen)
 
   const defaultCrumbs = crumbs ?? ["Admin", (navItems.find((n) => n.key === active)?.label ?? "Dashboard")]
 
   const closeSidebar = useCallback(() => setSidebarOpen(false), [])
 
+  // Persist sidebar state across page navigation
+  useEffect(() => { _sidebarOpen = sidebarOpen }, [sidebarOpen])
+
+  // On first visit, open sidebar by default on desktop
   useEffect(() => {
-    closeSidebar()
-  }, [pathname, closeSidebar])
+    if (typeof window === 'undefined') return
+    if (_firstVisit) {
+      _firstVisit = false
+      if (matchMedia('(min-width: 768px)').matches) setTimeout(() => setSidebarOpen(true))
+    }
+  }, [])
 
   return (
-    <div className="app" style={{ minHeight: "100dvh" }}>
-      <Sidebar active={active} open={isMobile ? sidebarOpen : true} onClose={closeSidebar} />
+    <div className={`app${!sidebarOpen ? " sidebar-collapsed" : ""}`} style={{ minHeight: "100dvh" }}>
+      <Sidebar active={active} open={sidebarOpen} onClose={closeSidebar} />
       <div className="main">
-        <Topbar crumbs={defaultCrumbs} onMenuClick={() => setSidebarOpen((c) => !c)} />
+        <Topbar crumbs={defaultCrumbs} onMenuClick={() => setSidebarOpen((c) => !c)} sidebarOpen={sidebarOpen} />
         <div className="page">{children}</div>
       </div>
     </div>
