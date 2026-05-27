@@ -123,13 +123,14 @@ export async function createCheckoutPreference(input: CheckoutPreferenceInput): 
       items,
       external_reference: input.external_reference,
       ...(input.return_urls?.success ? {
-        ...(!isSandboxMode() ? { auto_return: 'approved' } : {}),
+        auto_return: 'approved',
         back_urls: {
           success: input.return_urls.success,
           failure: input.return_urls.failure || '',
           pending: input.return_urls.pending || '',
         },
       } : {}),
+      notification_url: process.env.MERCADOPAGO_WEBHOOK_URL || undefined,
       payment_methods: {
         excluded_payment_types: [],
         installments: 12,
