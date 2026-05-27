@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { extractIdempotencyKey, findByIdempotencyKey, checkIdempotency, cacheIdempotencyResponse } from '@/lib/idempotency'
 import { validateServiceTokenBuyer } from '@/lib/service-token'
+import { requireAdmin } from '@/lib/admin-auth'
 import { createCheckoutPreference, MercadoPagoError } from '@/services/mercado-pago.service'
 import { handleRouteError, badRequest, unauthorized } from '@/lib/errors'
 import { createPaymentSchema } from '@/schemas/payment'
@@ -57,7 +58,8 @@ export async function POST(req: Request) {
   try {
     const svcToken = req.headers.get('X-Service-Token') || req.headers.get('x-service-token')
     if (!validateServiceTokenBuyer(svcToken)) {
-      return unauthorized('Valid Buyer service token required')
+      const adminErr = await requireAdmin()
+      if (adminErr) return adminErr
     }
 
     const idempotencyKey = extractIdempotencyKey(req)
