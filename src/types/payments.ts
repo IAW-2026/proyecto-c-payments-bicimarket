@@ -112,7 +112,7 @@ export interface PaymentCreateRequest {
 }
 
 export interface PaymentResponse {
-  data: Payment & { checkout_url?: string; gateway_reference?: string }
+  data: Payment & { checkout_url?: string; gateway_reference?: string; preference_warning?: string | null }
 }
 
 export interface MercadoPagoPreference {

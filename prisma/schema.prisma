@@ -66,6 +66,7 @@ enum RefundReason {
 
 enum WebhookEventStatus {
   received
+  processing
   processed
   failed
 }

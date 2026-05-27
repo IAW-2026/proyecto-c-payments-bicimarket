@@ -4,7 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { extractIdempotencyKey, findByIdempotencyKey, checkIdempotency, cacheIdempotencyResponse } from '@/lib/idempotency'
 import { validateServiceTokenBuyer } from '@/lib/service-token'
 import { requireAdmin } from '@/lib/admin-auth'
-import { createCheckoutPreference, MercadoPagoError } from '@/services/mercado-pago.service'
+import { createCheckoutPreference, MercadoPagoError, MercadoPagoCredentialError } from '@/services/mercado-pago.service'
 import { handleRouteError, badRequest, unauthorized } from '@/lib/errors'
 import { createPaymentSchema } from '@/schemas/payment'
 
@@ -123,6 +123,7 @@ export async function POST(req: Request) {
 
     let checkoutUrl: string | null = null
     let gatewayReference: string | null = null
+    let preferenceWarning: string | null = null
 
     try {
       const pref = await createCheckoutPreference({
@@ -145,21 +146,37 @@ export async function POST(req: Request) {
         data: { gateway_reference: gatewayReference },
       })
 
-      console.info(`[Payments:${requestId}] MP preference created: ${gatewayReference} | checkout_url set: ${!!checkoutUrl}`)
+      console.info(`[Payments:${requestId}] MP preference created: ${gatewayReference} | checkout_url set: ${!!checkoutUrl} | sandbox=${pref.sandbox_mode}`)
+
+      // Validate the checkout URL is well-formed
+      if (!checkoutUrl || !checkoutUrl.startsWith('https://')) {
+        console.error(`[Payments:${requestId}] Checkout URL is invalid: ${checkoutUrl}`)
+        preferenceWarning = 'MP returned an invalid checkout URL'
+        checkoutUrl = null
+      }
     } catch (mpErr) {
-      if (mpErr instanceof MercadoPagoError) {
+      if (mpErr instanceof MercadoPagoCredentialError) {
+        console.error(`[Payments:${requestId}] MP CREDENTIAL ERROR:`, {
+          message: mpErr.message,
+          mpCode: mpErr.mpCode,
+          statusCode: mpErr.statusCode,
+        })
+        preferenceWarning = `MP credential error: ${mpErr.message}`
+      } else if (mpErr instanceof MercadoPagoError) {
         console.error(`[Payments:${requestId}] MP preference creation failed:`, {
           statusCode: mpErr.statusCode,
           mpCode: mpErr.mpCode,
           message: mpErr.message,
         })
+        preferenceWarning = `MP error: ${mpErr.message}`
       } else {
         console.error(`[Payments:${requestId}] Failed to create MP checkout preference:`, mpErr)
+        preferenceWarning = 'Failed to create MP checkout preference'
       }
     }
 
     if (!checkoutUrl) {
-      console.warn(`[Payments:${requestId}] Payment ${payment.id} created WITHOUT checkout_url (MP preference failed)`)
+      console.warn(`[Payments:${requestId}] Payment ${payment.id} created WITHOUT checkout_url: ${preferenceWarning || 'unknown reason'}`)
     }
 
     const responseBody = {
@@ -167,6 +184,7 @@ export async function POST(req: Request) {
         ...payment,
         checkout_url: checkoutUrl,
         gateway_reference: gatewayReference,
+        preference_warning: preferenceWarning,
       },
     }
 

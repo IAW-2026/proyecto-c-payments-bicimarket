@@ -10,10 +10,6 @@ function getRawBody(req: Request): Promise<string> {
   return req.text()
 }
 
-function getJsonBody(req: Request): Promise<unknown> {
-  return req.clone().json()
-}
-
 export async function POST(req: Request) {
   const requestId = req.headers.get('x-request-id') || 'unknown'
   console.info(`[Webhook] Received webhook request x-request-id=${requestId}`)
@@ -38,33 +34,46 @@ export async function POST(req: Request) {
 
     console.info(`[Webhook] Event: ${eventType} | mp_event_id=${mpEventId} | signature_valid=${signatureValid}`)
 
-    // Deduplication: check if event already processed
-    const existingEvent = await prisma.mpWebhookEvent.findUnique({
-      where: { mp_event_id: mpEventId },
-    })
-
-    if (existingEvent) {
-      if (existingEvent.status === 'processed') {
-        console.info(`[Webhook] Duplicate event ${mpEventId} already processed, skipping`)
-        return NextResponse.json({ received: true, deduplicated: true }, { status: 200 })
-      }
-      // Event exists but not yet processed — update and continue
-      console.info(`[Webhook] Re-processing previously received event ${mpEventId}`)
-      await prisma.mpWebhookEvent.update({
-        where: { id: existingEvent.id },
-        data: { payload, signature_valid: signatureValid, status: 'received', last_error: null },
-      })
-    } else {
-      // First time seeing this event
+    // Deduplication: atomically create event or handle existing
+    // The unique constraint on mp_event_id ensures only one request creates the event
+    try {
       await prisma.mpWebhookEvent.create({
         data: {
           mp_event_id: mpEventId,
           event_type: eventType,
           payload,
           signature_valid: signatureValid,
-          status: 'received',
+          status: 'processing',
         },
       })
+    } catch (createErr) {
+      // Duck-type check for Prisma P2002 unique constraint violation
+      const isP2002 = createErr instanceof Error
+        && 'code' in createErr
+        && (createErr as { code: string }).code === 'P2002'
+      if (!isP2002) {
+        throw createErr // unexpected error
+      }
+      // P2002: event already created by another request — look it up
+      const existingEvent = await prisma.mpWebhookEvent.findUnique({
+        where: { mp_event_id: mpEventId },
+      })
+      if (!existingEvent) {
+        console.warn(`[Webhook] P2002 race but event ${mpEventId} not found — continuing`)
+      } else if (existingEvent.status === 'processed') {
+        console.info(`[Webhook] Duplicate event ${mpEventId} already processed, skipping`)
+        return NextResponse.json({ received: true, deduplicated: true }, { status: 200 })
+      } else if (existingEvent.status === 'processing') {
+        console.info(`[Webhook] Duplicate event ${mpEventId} currently being processed, skipping`)
+        return NextResponse.json({ received: true, deduplicated: true }, { status: 200 })
+      } else {
+        // Previous attempt failed — retry with updated metadata
+        console.info(`[Webhook] Re-processing previously failed event ${mpEventId} (status=${existingEvent.status})`)
+        await prisma.mpWebhookEvent.update({
+          where: { id: existingEvent.id },
+          data: { payload, signature_valid: signatureValid, status: 'processing', last_error: null },
+        })
+      }
     }
 
     if (!signatureValid) {
@@ -76,26 +85,22 @@ export async function POST(req: Request) {
       return NextResponse.json({ received: true, warning: 'Invalid signature' }, { status: 200 })
     }
 
-    // Process event asynchronously — respond 200 first
-    const processing = processWebhookEvent(payload).catch(async (err) => {
-      console.error(`[Webhook] Processing failed for event ${mpEventId}:`, err)
-      try {
-        await prisma.mpWebhookEvent.update({
-          where: { mp_event_id: mpEventId },
-          data: { status: 'failed', last_error: err instanceof Error ? err.message : String(err) },
-        })
-      } catch (updateErr) {
-        console.error('[Webhook] Failed to update event status:', updateErr)
-      }
-    })
-
-    await prisma.mpWebhookEvent.update({
-      where: { mp_event_id: mpEventId },
-      data: { status: 'processed', processed_at: new Date() },
-    })
-
-    // Await processing to ensure completion before responding
-    await processing
+    try {
+      await processWebhookEvent(payload)
+      await prisma.mpWebhookEvent.update({
+        where: { mp_event_id: mpEventId },
+        data: { status: 'processed', processed_at: new Date() },
+      })
+    } catch (procErr) {
+      console.error(`[Webhook] Processing failed for event ${mpEventId}:`, procErr)
+      await prisma.mpWebhookEvent.update({
+        where: { mp_event_id: mpEventId },
+        data: {
+          status: 'failed',
+          last_error: procErr instanceof Error ? procErr.message : String(procErr),
+        },
+      })
+    }
 
     return NextResponse.json({ received: true }, { status: 200 })
   } catch (err) {
@@ -137,11 +142,16 @@ async function handlePaymentEvent(mpPaymentId: string) {
 
   console.info(`[Webhook] MP payment ${mpPaymentId} status=${mpPayment.status} detail=${mpPayment.status_detail} ext_ref=${mpPayment.external_reference}`)
 
-  const payment = await prisma.payment.findFirst({
+  // Try multiple matching strategies:
+  // 1. By gateway_reference (MP payment ID stored on our payment)
+  // 2. By external_reference (our payment ID stored in MP preference)
+  // 3. By preference ID in gateway_reference (for sandbox fallback)
+  let payment = await prisma.payment.findFirst({
     where: {
       OR: [
         { gateway_reference: mpPayment.id },
         ...(mpPayment.external_reference ? [{ id: mpPayment.external_reference }] : []),
+        { gateway_reference: { contains: String(mpPayment.id) } },
       ],
     },
     include: { settlements: true },
@@ -149,6 +159,20 @@ async function handlePaymentEvent(mpPaymentId: string) {
 
   if (!payment) {
     console.warn(`[Webhook] Local payment not found for MP payment ${mpPayment.id} (ext_ref=${mpPayment.external_reference})`)
+    console.debug('[Webhook] Searching all pending payments with same approximate amount...')
+    // Fallback: try matching by amount and status for recently created pending payments
+    const recentPending = await prisma.payment.findMany({
+      where: {
+        status: 'pending',
+        gateway_reference: null,
+        created_at: { gte: new Date(Date.now() - 60 * 60 * 1000) }, // last hour
+      },
+      orderBy: { created_at: 'desc' },
+      take: 5,
+    })
+    if (recentPending.length > 0) {
+      console.debug(`[Webhook] Found ${recentPending.length} recent pending payments without gateway_reference:`, recentPending.map(p => p.id))
+    }
     return
   }
 

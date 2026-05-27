@@ -1,9 +1,9 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useCallback } from "react"
 import { useMutation } from "@tanstack/react-query"
 import axios from "axios"
-import { AlertCircle, CheckCircle, ExternalLink, Loader2, ShoppingCart, XCircle, Clock } from "lucide-react"
+import { AlertCircle, CheckCircle, ExternalLink, Loader2, ShoppingCart, XCircle, Clock, Bug } from "lucide-react"
 import type { PaymentResponse } from "@/types/payments"
 
 function useQueryParam(name: string): string | null {
@@ -20,10 +20,12 @@ export default function MockCheckoutPage() {
   const result = useQueryParam('result')
   const paymentId = useQueryParam('payment_id')
   const collectionId = useQueryParam('collection_id')
+  const preferenceWarning = useQueryParam('preference_warning')
 
   const mutation = useMutation<PaymentResponse, Error>({
     mutationFn: async () => {
       const amountCents = Math.round(parseFloat(amount) * 100)
+      const origin = window.location.origin
       const { data } = await axios.post<PaymentResponse>("/api/v1/test/create-payment", {
         order_id: `mock_ord_${Date.now()}`,
         buyer_profile_id: "mock_buyer_test",
@@ -32,9 +34,9 @@ export default function MockCheckoutPage() {
         amount_cents: amountCents,
         currency: "ARS",
         return_urls: {
-          success: `${window.location.origin}/test/checkout?result=success`,
-          failure: `${window.location.origin}/test/checkout?result=failure`,
-          pending: `${window.location.origin}/test/checkout?result=pending`,
+          success: `${origin}/test/checkout?result=success&payment_id={payment_id}`,
+          failure: `${origin}/test/checkout?result=failure&payment_id={payment_id}`,
+          pending: `${origin}/test/checkout?result=pending&payment_id={payment_id}`,
         },
         items_summary: [
           {
@@ -50,7 +52,16 @@ export default function MockCheckoutPage() {
 
   const payment = mutation.data?.data
   const checkoutUrl = payment?.checkout_url
+  const warning = payment?.preference_warning || preferenceWarning
 
+  // Use window.location.href for same-window redirect to maintain cookies
+  const handleRedirectCheckout = useCallback(() => {
+    if (checkoutUrl) {
+      window.location.href = checkoutUrl
+    }
+  }, [checkoutUrl])
+
+  // Fallback: open in new window (may lose cookies in some browsers)
   const handleOpenCheckout = useCallback(() => {
     if (checkoutUrl) {
       window.open(checkoutUrl, '_blank', 'noopener,noreferrer')
@@ -155,6 +166,16 @@ export default function MockCheckoutPage() {
             </div>
           )}
 
+          {warning && (
+            <div className="alert error">
+              <Bug className="ic" size={16} />
+              <div>
+                <div className="a-title">Advertencia de preferencia</div>
+                <div className="a-body">{warning}</div>
+              </div>
+            </div>
+          )}
+
           {checkoutUrl && (
             <div className="alert success">
               <CheckCircle className="ic" size={16} />
@@ -162,15 +183,25 @@ export default function MockCheckoutPage() {
                 <div className="a-title">Preferencia creada</div>
                 <div className="a-body" style={{ marginTop: 4, wordBreak: "break-all" }}>
                   ID: {payment?.id}<br />
-                  MP Ref: {payment?.gateway_reference}
+                  MP Ref: {payment?.gateway_reference}<br />
+                  <span className="muted" style={{ fontSize: 11 }}>
+                    Sandbox: {checkoutUrl.includes('sandbox') ? '✅' : '❌'}
+                  </span>
                 </div>
-                <button
-                  onClick={handleOpenCheckout}
-                  className="btn btn-primary btn-sm"
-                  style={{ marginTop: 8, display: "inline-flex" }}
-                >
-                  <ExternalLink size={14} /> Abrir Checkout MP
-                </button>
+                <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+                  <button
+                    onClick={handleRedirectCheckout}
+                    className="btn btn-primary btn-sm"
+                  >
+                    <ExternalLink size={14} /> Ir al Checkout (misma ventana)
+                  </button>
+                  <button
+                    onClick={handleOpenCheckout}
+                    className="btn btn-secondary btn-sm"
+                  >
+                    <ExternalLink size={14} /> Abrir en nueva ventana
+                  </button>
+                </div>
               </div>
             </div>
           )}
