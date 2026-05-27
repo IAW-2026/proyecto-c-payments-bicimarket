@@ -132,8 +132,9 @@ export async function createCheckoutPreference(input: CheckoutPreferenceInput): 
       } : {}),
       notification_url: process.env.MERCADOPAGO_WEBHOOK_URL || undefined,
       payment_methods: {
-        excluded_payment_types: [],
+        excluded_payment_types: [{ id: 'ticket' }, { id: 'atm' }],
         installments: 12,
+        default_installments: 1,
       },
       statement_descriptor: 'BICIMARKET',
     }
