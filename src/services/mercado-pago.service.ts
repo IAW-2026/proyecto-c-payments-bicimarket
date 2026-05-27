@@ -139,8 +139,12 @@ export async function createCheckoutPreference(input: CheckoutPreferenceInput): 
       statement_descriptor: 'BICIMARKET',
     }
 
-    if (input.buyer_email) {
-      body.payer = { email: input.buyer_email }
+    body.payer = {
+      email: input.buyer_email || 'test_user@testuser.com',
+      identification: {
+        type: 'DNI',
+        number: '12345678',
+      },
     }
 
     console.debug('[MP] preference body:', JSON.stringify(body, null, 2))
