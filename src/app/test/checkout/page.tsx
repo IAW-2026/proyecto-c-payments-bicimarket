@@ -1,15 +1,25 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useMutation } from "@tanstack/react-query"
 import axios from "axios"
-import { AlertCircle, CheckCircle, ExternalLink, Loader2, ShoppingCart } from "lucide-react"
+import { AlertCircle, CheckCircle, ExternalLink, Loader2, ShoppingCart, XCircle, Clock } from "lucide-react"
 import type { PaymentResponse } from "@/types/payments"
+
+function useQueryParam(name: string): string | null {
+  if (typeof window === 'undefined') return null
+  const params = new URLSearchParams(window.location.search)
+  return params.get(name)
+}
 
 export default function MockCheckoutPage() {
   const [email, setEmail] = useState("test_user_123@testuser.com")
   const [title, setTitle] = useState("Bicicleta Trek Marlin 5")
   const [amount, setAmount] = useState("500.00")
+
+  const result = useQueryParam('result')
+  const paymentId = useQueryParam('payment_id')
+  const collectionId = useQueryParam('collection_id')
 
   const mutation = useMutation<PaymentResponse, Error>({
     mutationFn: async () => {
@@ -41,6 +51,12 @@ export default function MockCheckoutPage() {
   const payment = mutation.data?.data
   const checkoutUrl = payment?.checkout_url
 
+  const handleOpenCheckout = useCallback(() => {
+    if (checkoutUrl) {
+      window.open(checkoutUrl, '_blank', 'noopener,noreferrer')
+    }
+  }, [checkoutUrl])
+
   return (
     <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
       <div className="card" style={{ width: 480, maxWidth: "100%" }}>
@@ -50,6 +66,24 @@ export default function MockCheckoutPage() {
         </div>
 
         <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {result && (
+            <div className={`alert ${result === 'success' ? 'success' : result === 'failure' ? 'error' : 'info'}`}>
+              {result === 'success' ? <CheckCircle className="ic" size={16} /> :
+               result === 'failure' ? <XCircle className="ic" size={16} /> :
+               <Clock className="ic" size={16} />}
+              <div>
+                <div className="a-title">
+                  Pago {result === 'success' ? 'Aprobado' : result === 'failure' ? 'Rechazado' : 'Pendiente'}
+                </div>
+                <div className="a-body">
+                  {collectionId && <>Collection ID: {collectionId}<br /></>}
+                  {paymentId && <>Payment ID: {paymentId}</>}
+                  {!collectionId && !paymentId && 'El pago fue procesado. Verificá el estado en el panel de administración.'}
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="alert info">
             <AlertCircle className="ic" size={16} />
             <div>
@@ -130,15 +164,13 @@ export default function MockCheckoutPage() {
                   ID: {payment?.id}<br />
                   MP Ref: {payment?.gateway_reference}
                 </div>
-                <a
-                  href={checkoutUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
+                <button
+                  onClick={handleOpenCheckout}
                   className="btn btn-primary btn-sm"
                   style={{ marginTop: 8, display: "inline-flex" }}
                 >
                   <ExternalLink size={14} /> Abrir Checkout MP
-                </a>
+                </button>
               </div>
             </div>
           )}

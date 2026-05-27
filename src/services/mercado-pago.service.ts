@@ -122,13 +122,12 @@ export async function createCheckoutPreference(input: CheckoutPreferenceInput): 
     const body: Record<string, unknown> = {
       items,
       external_reference: input.external_reference,
-      purpose: 'wallet_purchase',
-      ...(input.return_urls?.success ? {
+      ...(input.return_urls?.success || input.return_urls?.failure || input.return_urls?.pending ? {
         auto_return: 'approved',
         back_urls: {
-          success: input.return_urls.success,
-          failure: input.return_urls.failure || '',
-          pending: input.return_urls.pending || '',
+          ...(input.return_urls?.success ? { success: input.return_urls.success } : {}),
+          ...(input.return_urls?.failure ? { failure: input.return_urls.failure } : {}),
+          ...(input.return_urls?.pending ? { pending: input.return_urls.pending } : {}),
         },
       } : {}),
       notification_url: process.env.MERCADOPAGO_WEBHOOK_URL || undefined,
@@ -142,21 +141,30 @@ export async function createCheckoutPreference(input: CheckoutPreferenceInput): 
 
     body.payer = {
       email: input.buyer_email || 'test_user@testuser.com',
-      identification: {
+    }
+    if (!isSandboxMode()) {
+      (body.payer as Record<string, unknown>).identification = {
         type: 'DNI',
         number: '12345678',
-      },
+      }
     }
 
     console.debug('[MP] preference body:', JSON.stringify(body, null, 2))
 
     const { data } = await api().post('/checkout/preferences', body)
 
-    console.info(`[MP] Preference created: ${data.id} (sandbox: ${!!data.sandbox_init_point})`)
+    const sandboxMode = isSandboxMode()
+    const initPoint = sandboxMode ? data.sandbox_init_point : data.init_point
+
+    console.info(`[MP] Preference created: ${data.id} | sandbox=${sandboxMode} | has_sandbox_point=${!!data.sandbox_init_point} | init_point=${initPoint?.substring(0, 60)}...`)
+
+    if (sandboxMode && !data.sandbox_init_point) {
+      console.warn('[MP] SANDBOX MODE ENABLED but sandbox_init_point is empty! Using init_point as fallback. Check MERCADOPAGO_SANDBOX_MODE and ACCESS_TOKEN (sandbox credentials required).')
+    }
 
     return {
       id: data.id,
-      init_point: isSandboxMode() ? data.sandbox_init_point : data.init_point,
+      init_point: initPoint,
       sandbox_init_point: data.sandbox_init_point,
     }
   } catch (err) {

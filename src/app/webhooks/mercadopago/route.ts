@@ -6,87 +6,161 @@ import { notifyBuyerOrderStatus, createSellerSalesOrder } from '@/services/inter
 import { handleRouteError, errorResponse } from '@/lib/errors'
 import type { PaymentMethod } from '@/generated/prisma/client'
 
-async function getBodyAsString(req: Request): Promise<string> {
-  const clone = req.clone()
-  return clone.text()
+function getRawBody(req: Request): Promise<string> {
+  return req.text()
 }
 
-async function getBodyAsJson(req: Request): Promise<unknown> {
-  const clone = req.clone()
-  return clone.json()
+function getJsonBody(req: Request): Promise<unknown> {
+  return req.clone().json()
 }
 
 export async function POST(req: Request) {
+  const requestId = req.headers.get('x-request-id') || 'unknown'
+  console.info(`[Webhook] Received webhook request x-request-id=${requestId}`)
+
   try {
-    const rawBody = await getBodyAsString(req)
-    const payload = JSON.parse(rawBody)
+    const rawBody = await getRawBody(req)
     const signature = req.headers.get('x-signature')
     const xRequestId = req.headers.get('x-request-id')
 
     const signatureValid = validateMercadoPagoSignature(rawBody, signature, xRequestId)
 
-    const webhookEvent = await prisma.mpWebhookEvent.create({
-      data: {
-        mp_event_id: payload?.id ? String(payload.id) : `evt_${Date.now()}`,
-        event_type: payload?.type || 'unknown',
-        payload,
-        signature_valid: signatureValid,
-        status: signatureValid ? 'received' : 'received',
-      },
+    let payload: Record<string, unknown>
+    try {
+      payload = JSON.parse(rawBody) as Record<string, unknown>
+    } catch {
+      console.error('[Webhook] Invalid JSON body')
+      return errorResponse('BAD_REQUEST', 'Invalid JSON body', 400)
+    }
+
+    const mpEventId = payload?.id ? String(payload.id) : `evt_${Date.now()}`
+    const eventType = (payload?.type as string) || 'unknown'
+
+    console.info(`[Webhook] Event: ${eventType} | mp_event_id=${mpEventId} | signature_valid=${signatureValid}`)
+
+    // Deduplication: check if event already processed
+    const existingEvent = await prisma.mpWebhookEvent.findUnique({
+      where: { mp_event_id: mpEventId },
     })
 
+    if (existingEvent) {
+      if (existingEvent.status === 'processed') {
+        console.info(`[Webhook] Duplicate event ${mpEventId} already processed, skipping`)
+        return NextResponse.json({ received: true, deduplicated: true }, { status: 200 })
+      }
+      // Event exists but not yet processed — update and continue
+      console.info(`[Webhook] Re-processing previously received event ${mpEventId}`)
+      await prisma.mpWebhookEvent.update({
+        where: { id: existingEvent.id },
+        data: { payload, signature_valid: signatureValid, status: 'received', last_error: null },
+      })
+    } else {
+      // First time seeing this event
+      await prisma.mpWebhookEvent.create({
+        data: {
+          mp_event_id: mpEventId,
+          event_type: eventType,
+          payload,
+          signature_valid: signatureValid,
+          status: 'received',
+        },
+      })
+    }
+
     if (!signatureValid) {
-      console.warn('Webhook received with invalid signature:', payload?.id)
+      console.warn(`[Webhook] Invalid signature for event ${mpEventId}. Accepting but will not process.`)
+      await prisma.mpWebhookEvent.update({
+        where: { mp_event_id: mpEventId },
+        data: { status: 'failed', last_error: 'Invalid signature' },
+      })
       return NextResponse.json({ received: true, warning: 'Invalid signature' }, { status: 200 })
     }
 
-    await processWebhookEvent(payload)
+    // Process event asynchronously — respond 200 first
+    const processing = processWebhookEvent(payload).catch(async (err) => {
+      console.error(`[Webhook] Processing failed for event ${mpEventId}:`, err)
+      try {
+        await prisma.mpWebhookEvent.update({
+          where: { mp_event_id: mpEventId },
+          data: { status: 'failed', last_error: err instanceof Error ? err.message : String(err) },
+        })
+      } catch (updateErr) {
+        console.error('[Webhook] Failed to update event status:', updateErr)
+      }
+    })
 
     await prisma.mpWebhookEvent.update({
-      where: { id: webhookEvent.id },
+      where: { mp_event_id: mpEventId },
       data: { status: 'processed', processed_at: new Date() },
     })
 
+    // Await processing to ensure completion before responding
+    await processing
+
     return NextResponse.json({ received: true }, { status: 200 })
   } catch (err) {
-    console.error('Webhook processing failed:', err)
-    return errorResponse('INTERNAL_ERROR', 'Webhook processing failed', 500)
+    console.error('[Webhook] Fatal error processing webhook:', err)
+    return NextResponse.json({ received: true, error: 'Webhook processing failed' }, { status: 200 })
   }
 }
 
-async function processWebhookEvent(payload: any) {
-  const eventType = payload?.type || ''
-  const resource = payload?.data?.id
+async function processWebhookEvent(payload: Record<string, unknown>) {
+  const eventType = (payload?.type as string) || ''
+  const resource = payload?.data ? (payload.data as Record<string, unknown>)?.id as string : undefined
 
-  if (!resource) return
+  if (!resource) {
+    console.warn('[Webhook] No resource ID in payload:', payload?.id)
+    return
+  }
 
   if (eventType.includes('payment')) {
+    console.info(`[Webhook] Processing payment event: ${eventType} | resource=${resource}`)
     await handlePaymentEvent(resource)
+  } else {
+    console.info(`[Webhook] Ignoring non-payment event: ${eventType}`)
   }
 }
 
 async function handlePaymentEvent(mpPaymentId: string) {
-  const mpPayment = await getMpPayment(mpPaymentId)
-  if (!mpPayment) {
-    console.warn(`MP payment ${mpPaymentId} not found`)
+  let mpPayment
+  try {
+    mpPayment = await getMpPayment(mpPaymentId)
+  } catch (err) {
+    console.error(`[Webhook] Failed to fetch MP payment ${mpPaymentId}:`, err)
     return
   }
 
+  if (!mpPayment) {
+    console.warn(`[Webhook] MP payment ${mpPaymentId} not found from API`)
+    return
+  }
+
+  console.info(`[Webhook] MP payment ${mpPaymentId} status=${mpPayment.status} detail=${mpPayment.status_detail} ext_ref=${mpPayment.external_reference}`)
+
   const payment = await prisma.payment.findFirst({
-    where: { gateway_reference: mpPayment.id },
+    where: {
+      OR: [
+        { gateway_reference: mpPayment.id },
+        ...(mpPayment.external_reference ? [{ id: mpPayment.external_reference }] : []),
+      ],
+    },
     include: { settlements: true },
   })
 
   if (!payment) {
-    console.warn(`Local payment not found for MP reference ${mpPayment.id}`)
+    console.warn(`[Webhook] Local payment not found for MP payment ${mpPayment.id} (ext_ref=${mpPayment.external_reference})`)
     return
   }
+
+  console.info(`[Webhook] Found local payment ${payment.id} status=${payment.status} -> MP status=${mpPayment.status}`)
 
   const mpStatus = mpPayment.status
 
   if (mpStatus === 'approved' && payment.status === 'pending') {
     const method = mapPaymentMethod(mpPayment.payment_method_id)
     const cardLast4 = mpPayment.card?.last_four_digits || null
+
+    console.info(`[Webhook] Approving payment ${payment.id} method=${method} card_last4=${cardLast4}`)
 
     await prisma.payment.update({
       where: { id: payment.id },
@@ -109,7 +183,12 @@ async function handlePaymentEvent(mpPaymentId: string) {
       },
     })
 
-    await notifyBuyerOrderStatus(payment.order_id, 'paid', payment.id)
+    try {
+      await notifyBuyerOrderStatus(payment.order_id, 'paid', payment.id)
+      console.info(`[Webhook] Notified buyer of payment ${payment.id} status=paid`)
+    } catch (err) {
+      console.error(`[Webhook] Failed to notify buyer for payment ${payment.id}:`, err)
+    }
 
     const itemsSummary = payment.items_summary as Array<{
       seller_profile_id: string
@@ -146,15 +225,19 @@ async function handlePaymentEvent(mpPaymentId: string) {
             shipping_address_snapshot: item.shipping_address_snapshot || {},
             payment_id: payment.id,
           })
+          console.info(`[Webhook] Created sales order for seller ${item.seller_profile_id}`)
         } catch (err) {
-          console.error(`Failed to create sales order for seller ${item.seller_profile_id}:`, err)
+          console.error(`[Webhook] Failed to create sales order for seller ${item.seller_profile_id}:`, err)
         }
       }
-
+    } else {
+      console.warn(`[Webhook] Payment ${payment.id} approved but no items_summary found`)
     }
   }
 
   if (mpStatus === 'rejected' && payment.status === 'pending') {
+    console.info(`[Webhook] Rejecting payment ${payment.id}`)
+
     await prisma.payment.update({
       where: { id: payment.id },
       data: { status: 'rejected', rejected_at: new Date() },
@@ -172,12 +255,15 @@ async function handlePaymentEvent(mpPaymentId: string) {
 
     try {
       await notifyBuyerOrderStatus(payment.order_id, 'payment_failed', payment.id)
+      console.info(`[Webhook] Notified buyer of rejected payment ${payment.id}`)
     } catch (err) {
-      console.error('Failed to notify buyer of rejected payment:', err)
+      console.error(`[Webhook] Failed to notify buyer of rejected payment ${payment.id}:`, err)
     }
   }
 
   if (mpStatus === 'refunded' && payment.status === 'approved') {
+    console.info(`[Webhook] Refunding payment ${payment.id}`)
+
     await prisma.payment.update({
       where: { id: payment.id },
       data: { status: 'refunded' },
@@ -195,8 +281,34 @@ async function handlePaymentEvent(mpPaymentId: string) {
 
     try {
       await notifyBuyerOrderStatus(payment.order_id, 'refunded', payment.id)
+      console.info(`[Webhook] Notified buyer of refunded payment ${payment.id}`)
     } catch (err) {
-      console.error('Failed to notify buyer of refunded payment:', err)
+      console.error(`[Webhook] Failed to notify buyer of refunded payment ${payment.id}:`, err)
+    }
+  }
+
+  if (mpStatus === 'cancelled' && payment.status === 'pending') {
+    console.info(`[Webhook] Cancelling payment ${payment.id}`)
+
+    await prisma.payment.update({
+      where: { id: payment.id },
+      data: { status: 'cancelled', cancelled_at: new Date() },
+    })
+
+    await prisma.paymentStatusHistory.create({
+      data: {
+        payment_id: payment.id,
+        from_status: 'pending',
+        to_status: 'cancelled',
+        changed_by: 'system',
+        reason: 'MP payment cancelled',
+      },
+    })
+
+    try {
+      await notifyBuyerOrderStatus(payment.order_id, 'cancelled', payment.id)
+    } catch (err) {
+      console.error(`[Webhook] Failed to notify buyer of cancelled payment ${payment.id}:`, err)
     }
   }
 }

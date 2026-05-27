@@ -1,3 +1,4 @@
+import crypto from 'crypto'
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { extractIdempotencyKey, findByIdempotencyKey, checkIdempotency, cacheIdempotencyResponse } from '@/lib/idempotency'
@@ -55,6 +56,7 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
+  const requestId = crypto.randomUUID?.() || `req_${Date.now()}`
   try {
     const svcToken = req.headers.get('X-Service-Token') || req.headers.get('x-service-token')
     if (!validateServiceTokenBuyer(svcToken)) {
@@ -65,16 +67,23 @@ export async function POST(req: Request) {
     const idempotencyKey = extractIdempotencyKey(req)
     if (idempotencyKey) {
       const existing = await findByIdempotencyKey(idempotencyKey)
-      if (existing) return NextResponse.json({ data: existing }, { status: 200 })
+      if (existing) {
+        console.info(`[Payments:${requestId}] Idempotency hit (payment): ${idempotencyKey}`)
+        return NextResponse.json({ data: existing }, { status: 200 })
+      }
 
       const idempotent = await checkIdempotency(idempotencyKey)
-      if (idempotent.cached) return idempotent.response
+      if (idempotent.cached) {
+        console.info(`[Payments:${requestId}] Idempotency hit (cache): ${idempotencyKey}`)
+        return idempotent.response
+      }
     }
 
     const body = await req.json()
 
     const parsed = createPaymentSchema.safeParse(body)
     if (!parsed.success) {
+      console.warn(`[Payments:${requestId}] Validation failed:`, parsed.error.issues)
       return badRequest('Validation failed', {
         errors: parsed.error.issues.map(i => ({ path: i.path.join('.'), message: i.message })),
       })
@@ -95,6 +104,8 @@ export async function POST(req: Request) {
       }
     }
 
+    console.info(`[Payments:${requestId}] Creating payment: order=${validated.order_id} amount=${validated.amount_cents}`)
+
     const payment = await prisma.payment.create({
       data: {
         order_id: validated.order_id,
@@ -107,6 +118,8 @@ export async function POST(req: Request) {
         status: 'pending',
       },
     })
+
+    console.info(`[Payments:${requestId}] Payment created: ${payment.id}`)
 
     let checkoutUrl: string | null = null
     let gatewayReference: string | null = null
@@ -131,12 +144,22 @@ export async function POST(req: Request) {
         where: { id: payment.id },
         data: { gateway_reference: gatewayReference },
       })
+
+      console.info(`[Payments:${requestId}] MP preference created: ${gatewayReference} | checkout_url set: ${!!checkoutUrl}`)
     } catch (mpErr) {
       if (mpErr instanceof MercadoPagoError) {
-        console.error(`[Payments] MP preference creation failed: ${mpErr.message}`)
+        console.error(`[Payments:${requestId}] MP preference creation failed:`, {
+          statusCode: mpErr.statusCode,
+          mpCode: mpErr.mpCode,
+          message: mpErr.message,
+        })
       } else {
-        console.error('[Payments] Failed to create MP checkout preference:', mpErr)
+        console.error(`[Payments:${requestId}] Failed to create MP checkout preference:`, mpErr)
       }
+    }
+
+    if (!checkoutUrl) {
+      console.warn(`[Payments:${requestId}] Payment ${payment.id} created WITHOUT checkout_url (MP preference failed)`)
     }
 
     const responseBody = {
@@ -153,6 +176,7 @@ export async function POST(req: Request) {
 
     return NextResponse.json(responseBody, { status: 201 })
   } catch (err) {
+    console.error(`[Payments:${requestId}] Fatal error:`, err)
     return handleRouteError(err, 'creating payment')
   }
 }
