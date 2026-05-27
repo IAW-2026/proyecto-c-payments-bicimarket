@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { extractIdempotencyKey, findByIdempotencyKey } from '@/lib/idempotency'
+import { extractIdempotencyKey, findByIdempotencyKey, checkIdempotency, cacheIdempotencyResponse } from '@/lib/idempotency'
 import { validateServiceTokenBuyer } from '@/lib/service-token'
-import { createCheckoutPreference } from '@/services/mercado-pago.service'
-import { handleRouteError, badRequest, unauthorized, notFound } from '@/lib/errors'
+import { createCheckoutPreference, MercadoPagoError } from '@/services/mercado-pago.service'
+import { handleRouteError, badRequest, unauthorized } from '@/lib/errors'
+import { createPaymentSchema } from '@/schemas/payment'
 
 export async function GET(req: Request) {
   try {
@@ -56,28 +57,37 @@ export async function POST(req: Request) {
   try {
     const svcToken = req.headers.get('X-Service-Token') || req.headers.get('x-service-token')
     if (!validateServiceTokenBuyer(svcToken)) {
-      return unauthorized('Invalid service token')
+      return unauthorized('Valid Buyer service token required')
     }
 
     const idempotencyKey = extractIdempotencyKey(req)
     if (idempotencyKey) {
       const existing = await findByIdempotencyKey(idempotencyKey)
       if (existing) return NextResponse.json({ data: existing }, { status: 200 })
+
+      const idempotent = await checkIdempotency(idempotencyKey)
+      if (idempotent.cached) return idempotent.response
     }
 
     const body = await req.json()
-    if (!body?.order_id || !body?.amount_cents || !body?.buyer_profile_id || !body?.buyer_clerk_user_id) {
-      return badRequest('order_id, amount_cents, buyer_profile_id, and buyer_clerk_user_id required')
+
+    const parsed = createPaymentSchema.safeParse(body)
+    if (!parsed.success) {
+      return badRequest('Validation failed', {
+        errors: parsed.error.issues.map(i => ({ path: i.path.join('.'), message: i.message })),
+      })
     }
 
-    if (body.items_summary && Array.isArray(body.items_summary)) {
-      const summedAmount = body.items_summary.reduce((sum: number, item: any) => {
-        return sum + (item.subtotal_cents || 0) + (item.shipping_cost_cents || 0)
+    const validated = parsed.data
+
+    if (validated.items_summary) {
+      const summedAmount = validated.items_summary.reduce((sum, item) => {
+        return sum + item.subtotal_cents + item.shipping_cost_cents
       }, 0)
 
-      if (summedAmount !== body.amount_cents) {
-        return badRequest(`items_summary total (${summedAmount}) does not match amount_cents (${body.amount_cents})`, {
-          expected: body.amount_cents,
+      if (summedAmount !== validated.amount_cents) {
+        return badRequest(`items_summary total (${summedAmount}) does not match amount_cents (${validated.amount_cents})`, {
+          expected: validated.amount_cents,
           received: summedAmount,
         })
       }
@@ -85,13 +95,13 @@ export async function POST(req: Request) {
 
     const payment = await prisma.payment.create({
       data: {
-        order_id: body.order_id,
-        buyer_clerk_user_id: body.buyer_clerk_user_id,
-        buyer_profile_id: body.buyer_profile_id,
-        amount_cents: body.amount_cents,
-        currency: body.currency || 'ARS',
+        order_id: validated.order_id,
+        buyer_clerk_user_id: validated.buyer_clerk_user_id,
+        buyer_profile_id: validated.buyer_profile_id,
+        amount_cents: validated.amount_cents,
+        currency: validated.currency || 'ARS',
         idempotency_key: idempotencyKey,
-        items_summary: body.items_summary || null,
+        items_summary: validated.items_summary ?? undefined,
         status: 'pending',
       },
     })
@@ -102,14 +112,14 @@ export async function POST(req: Request) {
     try {
       const pref = await createCheckoutPreference({
         amount_cents: payment.amount_cents,
-        external_reference: payment.order_id,
-        buyer_email: body.buyer_email,
-        items: body.items_summary?.map((item: any) => ({
+        external_reference: payment.id,
+        buyer_email: validated.buyer_email,
+        items: validated.items_summary?.map((item) => ({
           title: `Seller ${item.seller_profile_id}`,
           quantity: 1,
           unit_price_cents: item.subtotal_cents + item.shipping_cost_cents,
         })) || [],
-        return_urls: body.return_urls,
+        return_urls: validated.return_urls,
       })
 
       checkoutUrl = pref.init_point
@@ -120,16 +130,26 @@ export async function POST(req: Request) {
         data: { gateway_reference: gatewayReference },
       })
     } catch (mpErr) {
-      console.error('Failed to create MP checkout preference:', mpErr)
+      if (mpErr instanceof MercadoPagoError) {
+        console.error(`[Payments] MP preference creation failed: ${mpErr.message}`)
+      } else {
+        console.error('[Payments] Failed to create MP checkout preference:', mpErr)
+      }
     }
 
-    return NextResponse.json({
+    const responseBody = {
       data: {
         ...payment,
         checkout_url: checkoutUrl,
         gateway_reference: gatewayReference,
       },
-    }, { status: 201 })
+    }
+
+    if (idempotencyKey) {
+      await cacheIdempotencyResponse(idempotencyKey, responseBody, 201)
+    }
+
+    return NextResponse.json(responseBody, { status: 201 })
   } catch (err) {
     return handleRouteError(err, 'creating payment')
   }

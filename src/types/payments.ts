@@ -84,18 +84,35 @@ export interface PaymentCreateRequest {
   order_id: string
   buyer_profile_id: string
   buyer_clerk_user_id?: string
+  buyer_email?: string
   amount_cents: number
   currency?: string
   idempotency_key?: string
+  return_urls?: {
+    success?: string
+    failure?: string
+    pending?: string
+  }
   items_summary?: Array<{
     seller_profile_id: string
     subtotal_cents: number
     shipping_cost_cents: number
+    order_seller_group_id?: string
+    buyer_profile_id?: string
+    buyer_clerk_user_id?: string
+    items?: Array<{
+      product_id: string
+      product_name_snapshot: string
+      unit_price_cents: number
+      quantity: number
+    }>
+    shipping_address_snapshot?: Record<string, unknown>
+    currency?: string
   }>
 }
 
 export interface PaymentResponse {
-  data: Payment & { checkout_url?: string }
+  data: Payment & { checkout_url?: string; gateway_reference?: string }
 }
 
 export interface MercadoPagoPreference {
