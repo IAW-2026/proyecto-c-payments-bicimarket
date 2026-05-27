@@ -122,6 +122,7 @@ export async function createCheckoutPreference(input: CheckoutPreferenceInput): 
     const body: Record<string, unknown> = {
       items,
       external_reference: input.external_reference,
+      purpose: 'wallet_purchase',
       ...(input.return_urls?.success ? {
         auto_return: 'approved',
         back_urls: {
