@@ -29,6 +29,10 @@ function buildSignatureManifest(dataId: string, xRequestId: string, ts: string):
   return `id:${dataId};request-id:${xRequestId};ts:${ts};`
 }
 
+function normalizeMercadoPagoDataId(dataId: string): string {
+  return /[a-z]/i.test(dataId) ? dataId.toLowerCase() : dataId
+}
+
 function constantTimeEqualsHex(expectedHex: string, receivedHex: string): boolean {
   if (!/^[0-9a-f]+$/i.test(expectedHex) || !/^[0-9a-f]+$/i.test(receivedHex)) {
     return false
@@ -71,7 +75,7 @@ export function validateMercadoPagoSignature(
     return false
   }
 
-  const manifest = buildSignatureManifest(dataId, xRequestId ?? '', parsed.ts)
+  const manifest = buildSignatureManifest(normalizeMercadoPagoDataId(dataId), xRequestId ?? '', parsed.ts)
   const expectedSignature = computeHmacSha256Hex(secret, manifest)
 
   if (constantTimeEqualsHex(expectedSignature, parsed.v1)) {

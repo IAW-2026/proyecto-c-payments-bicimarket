@@ -19,7 +19,7 @@ export async function POST(req: Request) {
     const signature = req.headers.get('x-signature')
     const xRequestId = req.headers.get('x-request-id')
     const url = new URL(req.url)
-    const dataId = url.searchParams.get('data.id')
+    const dataId = url.searchParams.get('data.id') || url.searchParams.get('id')
 
     let payload: Record<string, unknown>
     try {
