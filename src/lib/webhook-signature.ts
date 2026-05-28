@@ -18,18 +18,11 @@ export function parseSignatureHeader(header: string): SignatureParts | null {
   return { ts: parts.ts, v1: parts.v1 }
 }
 
-function computeHmacSha256Hex(secret: string, data: string): string {
+function computeHmacSha256Hex(key: string | Buffer, data: string): string {
   return crypto
-    .createHmac('sha256', secret)
+    .createHmac('sha256', key)
     .update(data, 'utf8')
     .digest('hex')
-}
-
-function timingSafeEqual(a: Buffer, b: Buffer): boolean {
-  if (a.length !== b.length) {
-    return false
-  }
-  return crypto.timingSafeEqual(a, b)
 }
 
 export function validateMercadoPagoSignature(
@@ -59,28 +52,25 @@ export function validateMercadoPagoSignature(
   const idValue = dataId && /^[a-zA-Z0-9]+$/.test(dataId) ? dataId.toLowerCase() : (dataId ?? '')
   const signedString = `id:${idValue};request-id:${xRequestId ?? ''};ts:${parsed.ts};`
 
-  const expected = computeHmacSha256Hex(secret, signedString)
+  const rawKeyExpected = computeHmacSha256Hex(secret, signedString)
 
-  // body-based: some MP implementations sign the raw body directly
-  // body param was removed from signature, but we still have it available
+  let hexKeyBuf: Buffer | undefined
+  try { hexKeyBuf = Buffer.from(secret, 'hex') } catch {}
+  const hexKeyExpected = hexKeyBuf && hexKeyBuf.length > 0
+    ? computeHmacSha256Hex(hexKeyBuf, signedString)
+    : null
 
-  try {
-    const expectedBuf = Buffer.from(expected, 'hex')
-    const receivedBuf = Buffer.from(parsed.v1, 'hex')
-
-    if (expectedBuf.length !== receivedBuf.length) {
-      console.warn(`[WebhookSignature] Signature length mismatch: expected=${expectedBuf.length} received=${receivedBuf.length}`)
-      console.warn(`[WebhookSignature] expected_hex=${expected} received_hex=${parsed.v1}`)
-      return false
-    }
-
-    const match = timingSafeEqual(expectedBuf, receivedBuf)
-    if (!match) {
-      console.warn(`[WebhookSignature] MISMATCH manifest="${signedString}" expected_hex=${expected} received_hex=${parsed.v1} dataId=${dataId} xRequestId=${xRequestId}`)
-    }
-    return match
-  } catch (err) {
-    console.warn('[WebhookSignature] Signature comparison failed:', err)
-    return false
+  if (rawKeyExpected === parsed.v1) return true
+  if (hexKeyExpected === parsed.v1) {
+    console.info('[WebhookSignature] Match with hex-decoded key')
+    return true
   }
+
+  console.warn(
+    `[WebhookSignature] MISMATCH manifest="${signedString}" ` +
+    `raw_key_expected=${rawKeyExpected} ` +
+    `hex_key_expected=${hexKeyExpected} ` +
+    `received=${parsed.v1} dataId=${dataId} xRequestId=${xRequestId}`
+  )
+  return false
 }

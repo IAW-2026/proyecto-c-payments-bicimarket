@@ -1,4 +1,3 @@
-import crypto from 'crypto'
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { validateMercadoPagoSignature } from '@/lib/webhook-signature'
@@ -15,30 +14,12 @@ export async function POST(req: Request) {
   const requestId = req.headers.get('x-request-id') || 'unknown'
   console.info(`[Webhook] Received webhook request x-request-id=${requestId}`)
 
-  console.log('[Webhook] DEBUG ENV:', {
-  hasSecret: !!process.env.MERCADOPAGO_WEBHOOK_SECRET,
-  secretLength: process.env.MERCADOPAGO_WEBHOOK_SECRET?.length,
-  sandboxMode: process.env.MERCADOPAGO_SANDBOX_MODE,
-  })
-
   try {
     const rawBody = await getRawBody(req)
     const signature = req.headers.get('x-signature')
     const xRequestId = req.headers.get('x-request-id')
     const url = new URL(req.url)
     const dataId = url.searchParams.get('data.id')
-
-    console.warn(`[Webhook] DEBUG headers: x-signature=${signature} x-request-id=${xRequestId}`)
-    console.warn(`[Webhook] DEBUG url: ${req.url} query_data_id=${dataId}`)
-
-    // Debug: try body-based and original formats to figure out MP's actual algorithm
-    const secret = process.env.MERCADOPAGO_WEBHOOK_SECRET!
-    const bodyHash = crypto.createHmac('sha256', secret).update(rawBody, 'utf8').digest('hex')
-    const tsFromHeader = signature?.split(',')?.[0]?.split('=')?.[1] ?? ''
-    const oldFormat = crypto.createHmac('sha256', secret).update(xRequestId + tsFromHeader + rawBody, 'utf8').digest('hex')
-    console.warn(`[Webhook] DEBUG body_hash=${bodyHash} old_format_hash=${oldFormat}`)
-
-    const signatureValid = validateMercadoPagoSignature(signature, xRequestId, dataId)
 
     let payload: Record<string, unknown>
     try {
@@ -47,6 +28,8 @@ export async function POST(req: Request) {
       console.error('[Webhook] Invalid JSON body')
       return errorResponse('BAD_REQUEST', 'Invalid JSON body', 400)
     }
+
+    const signatureValid = validateMercadoPagoSignature(signature, xRequestId, dataId)
 
     const mpEventId = payload?.id ? String(payload.id) : `evt_${Date.now()}`
     const eventType = (payload?.type as string) || 'unknown'
