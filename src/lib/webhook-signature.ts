@@ -73,10 +73,7 @@ export function validateMercadoPagoSignature(
 
     const match = timingSafeEqual(expectedBuf, receivedBuf)
     if (!match) {
-      console.warn(`[WebhookSignature] Signature mismatch`)
-      console.warn(`[WebhookSignature] manifest=${signedString}`)
-      console.warn(`[WebhookSignature] expected_hex=${expected}`)
-      console.warn(`[WebhookSignature] received_hex=${parsed.v1}`)
+      console.warn(`[WebhookSignature] MISMATCH manifest="${signedString}" expected_hex=${expected} received_hex=${parsed.v1} dataId=${dataId} xRequestId=${xRequestId}`)
     }
     return match
   } catch (err) {
