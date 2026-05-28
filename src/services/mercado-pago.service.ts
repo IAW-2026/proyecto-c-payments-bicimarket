@@ -122,7 +122,6 @@ export interface CheckoutPreferenceInput {
 export interface CheckoutPreferenceResult {
   id: string
   init_point: string
-  sandbox_init_point: string
   sandbox_mode: boolean
 }
 
@@ -211,21 +210,14 @@ export async function createCheckoutPreference(input: CheckoutPreferenceInput): 
 
     const { data } = await api().post('/checkout/preferences', body)
 
-    const initPoint = sandboxMode ? data.sandbox_init_point : data.init_point
+    const initPoint = data.init_point
 
-    console.info(`[MP] Preference created: ${data.id} | sandbox=${sandboxMode} | has_init_point=${!!data.init_point} | has_sandbox_init_point=${!!data.sandbox_init_point}`)
+    console.info(`[MP] Preference created: ${data.id} | sandbox=${sandboxMode} | has_init_point=${!!data.init_point}}`)
     console.info(`[MP] Using init_point: ${initPoint ? initPoint.substring(0, 80) + '...' : 'MISSING!'}`)
-
-    if (sandboxMode && !data.sandbox_init_point) {
-      console.warn('[MP] SANDBOX MODE but sandbox_init_point is empty! Using init_point fallback.')
-      console.warn('[MP] Verify: (1) MERCADOPAGO_SANDBOX_ACCESS_TOKEN or MERCADOPAGO_ACCESS_TOKEN starts with TEST_')
-      console.warn('[MP] Verify: (2) The test user belongs to the same application as the access token.')
-    }
 
     return {
       id: data.id,
       init_point: initPoint || data.init_point,
-      sandbox_init_point: data.sandbox_init_point,
       sandbox_mode: sandboxMode,
     }
   } catch (err) {
