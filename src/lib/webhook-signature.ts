@@ -61,6 +61,9 @@ export function validateMercadoPagoSignature(
 
   const expected = computeHmacSha256Hex(secret, signedString)
 
+  // body-based: some MP implementations sign the raw body directly
+  // body param was removed from signature, but we still have it available
+
   try {
     const expectedBuf = Buffer.from(expected, 'hex')
     const receivedBuf = Buffer.from(parsed.v1, 'hex')

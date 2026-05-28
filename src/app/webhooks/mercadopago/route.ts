@@ -1,3 +1,4 @@
+import crypto from 'crypto'
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { validateMercadoPagoSignature } from '@/lib/webhook-signature'
@@ -29,6 +30,13 @@ export async function POST(req: Request) {
 
     console.warn(`[Webhook] DEBUG headers: x-signature=${signature} x-request-id=${xRequestId}`)
     console.warn(`[Webhook] DEBUG url: ${req.url} query_data_id=${dataId}`)
+
+    // Debug: try body-based and original formats to figure out MP's actual algorithm
+    const secret = process.env.MERCADOPAGO_WEBHOOK_SECRET!
+    const bodyHash = crypto.createHmac('sha256', secret).update(rawBody, 'utf8').digest('hex')
+    const tsFromHeader = signature?.split(',')?.[0]?.split('=')?.[1] ?? ''
+    const oldFormat = crypto.createHmac('sha256', secret).update(xRequestId + tsFromHeader + rawBody, 'utf8').digest('hex')
+    console.warn(`[Webhook] DEBUG body_hash=${bodyHash} old_format_hash=${oldFormat}`)
 
     const signatureValid = validateMercadoPagoSignature(signature, xRequestId, dataId)
 
