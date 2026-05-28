@@ -14,6 +14,12 @@ export async function POST(req: Request) {
   const requestId = req.headers.get('x-request-id') || 'unknown'
   console.info(`[Webhook] Received webhook request x-request-id=${requestId}`)
 
+  console.log('[Webhook] DEBUG ENV:', {
+  hasSecret: !!process.env.MERCADOPAGO_WEBHOOK_SECRET,
+  secretLength: process.env.MERCADOPAGO_WEBHOOK_SECRET?.length,
+  sandboxMode: process.env.MERCADOPAGO_SANDBOX_MODE,
+  })
+
   try {
     const rawBody = await getRawBody(req)
     const signature = req.headers.get('x-signature')
@@ -33,7 +39,6 @@ export async function POST(req: Request) {
     const mpEventId = payload?.id ? String(payload.id) : `evt_${Date.now()}`
     const eventType = (payload?.type as string) || 'unknown'
 
-    console.log('[Webhook] MERCADOPAGO_WEBHOOK_SECRET present:', !!process.env.MERCADOPAGO_WEBHOOK_SECRET)
     console.info(`[Webhook] Event: ${eventType} | mp_event_id=${mpEventId} | signature_valid=${signatureValid}`)
 
     // Deduplication: atomically create event or handle existing
