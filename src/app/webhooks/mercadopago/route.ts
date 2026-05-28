@@ -24,7 +24,11 @@ export async function POST(req: Request) {
     const rawBody = await getRawBody(req)
     const signature = req.headers.get('x-signature')
     const xRequestId = req.headers.get('x-request-id')
-    const dataId = new URL(req.url).searchParams.get('data.id')
+    const url = new URL(req.url)
+    const dataId = url.searchParams.get('data.id')
+
+    console.warn(`[Webhook] DEBUG headers: x-signature=${signature} x-request-id=${xRequestId}`)
+    console.warn(`[Webhook] DEBUG url: ${req.url} query_data_id=${dataId}`)
 
     const signatureValid = validateMercadoPagoSignature(signature, xRequestId, dataId)
 
@@ -73,8 +77,12 @@ export async function POST(req: Request) {
       } else if (existingEvent.status === 'processing') {
         console.info(`[Webhook] Duplicate event ${mpEventId} currently being processed, skipping`)
         return NextResponse.json({ received: true, deduplicated: true }, { status: 200 })
+      } else if (!existingEvent.signature_valid) {
+        // Signature was already invalid — will never pass, skip retry
+        console.info(`[Webhook] Duplicate event ${mpEventId} skipped (signature invalid, status=${existingEvent.status})`)
+        return NextResponse.json({ received: true, deduplicated: true }, { status: 200 })
       } else {
-        // Previous attempt failed — retry with updated metadata
+        // Previous attempt failed for a transient reason — retry
         console.info(`[Webhook] Re-processing previously failed event ${mpEventId} (status=${existingEvent.status})`)
         await prisma.mpWebhookEvent.update({
           where: { id: existingEvent.id },

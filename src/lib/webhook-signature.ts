@@ -67,10 +67,18 @@ export function validateMercadoPagoSignature(
 
     if (expectedBuf.length !== receivedBuf.length) {
       console.warn(`[WebhookSignature] Signature length mismatch: expected=${expectedBuf.length} received=${receivedBuf.length}`)
+      console.warn(`[WebhookSignature] expected_hex=${expected} received_hex=${parsed.v1}`)
       return false
     }
 
-    return timingSafeEqual(expectedBuf, receivedBuf)
+    const match = timingSafeEqual(expectedBuf, receivedBuf)
+    if (!match) {
+      console.warn(`[WebhookSignature] Signature mismatch`)
+      console.warn(`[WebhookSignature] manifest=${signedString}`)
+      console.warn(`[WebhookSignature] expected_hex=${expected}`)
+      console.warn(`[WebhookSignature] received_hex=${parsed.v1}`)
+    }
+    return match
   } catch (err) {
     console.warn('[WebhookSignature] Signature comparison failed:', err)
     return false
