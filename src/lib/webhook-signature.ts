@@ -54,16 +54,10 @@ export function validateMercadoPagoSignature(
     return false
   }
   
-  const parts: string[] = []
-  if (dataId) {
-    const normalized = /^[a-zA-Z0-9]+$/.test(dataId) ? dataId.toLowerCase() : dataId
-    parts.push(`id:${normalized}`)
-  }
-  if (xRequestId) {
-    parts.push(`request-id:${xRequestId}`)
-  }
-  parts.push(`ts:${parsed.ts}`)
-  const signedString = parts.join(';') + ';'
+  // Per MP docs code examples, the manifest ALWAYS includes all three segments.
+  // If a value is absent, its segment is included with an empty value.
+  const idValue = dataId && /^[a-zA-Z0-9]+$/.test(dataId) ? dataId.toLowerCase() : (dataId ?? '')
+  const signedString = `id:${idValue};request-id:${xRequestId ?? ''};ts:${parsed.ts};`
 
   const expected = computeHmacSha256Hex(secret, signedString)
 
