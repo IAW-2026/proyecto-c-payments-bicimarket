@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { validateMercadoPagoSignature } from '@/lib/webhook-signature'
 import { getPayment as getMpPayment } from '@/services/mercado-pago.service'
 import { notifyBuyerOrderStatus, createSellerSalesOrder } from '@/services/inter-app-client.service'
-import { handleRouteError, errorResponse } from '@/lib/errors'
+import { errorResponse } from '@/lib/errors'
 import type { PaymentMethod } from '@/generated/prisma/client'
 
 function getRawBody(req: Request): Promise<string> {
@@ -29,7 +29,12 @@ export async function POST(req: Request) {
       return errorResponse('BAD_REQUEST', 'Invalid JSON body', 400)
     }
 
-    const signatureValid = validateMercadoPagoSignature(signature, xRequestId, dataId)
+    const bodyDataId = payload?.data && typeof payload.data === 'object'
+      ? String((payload.data as Record<string, unknown>).id ?? '')
+      : ''
+    const notificationDataId = dataId || bodyDataId || null
+
+    const signatureValid = validateMercadoPagoSignature(signature, xRequestId, notificationDataId)
 
     const mpEventId = payload?.id ? String(payload.id) : `evt_${Date.now()}`
     const eventType = (payload?.type as string) || 'unknown'
