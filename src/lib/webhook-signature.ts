@@ -53,10 +53,7 @@ export function validateMercadoPagoSignature(
     console.error('[WebhookSignature] MERCADOPAGO_WEBHOOK_SECRET is not configured')
     return false
   }
-
-  // Build the signed template per MP spec:
-  //   id:<data.id_url>;request-id:<x-request-id_header>;ts:<ts_header>;
-  // Remove any segment whose value is not present.
+  
   const parts: string[] = []
   if (dataId) {
     const normalized = /^[a-zA-Z0-9]+$/.test(dataId) ? dataId.toLowerCase() : dataId

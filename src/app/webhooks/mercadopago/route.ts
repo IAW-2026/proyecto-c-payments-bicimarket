@@ -33,6 +33,7 @@ export async function POST(req: Request) {
     const mpEventId = payload?.id ? String(payload.id) : `evt_${Date.now()}`
     const eventType = (payload?.type as string) || 'unknown'
 
+    console.log('[Webhook] MERCADOPAGO_WEBHOOK_SECRET present:', !!process.env.MERCADOPAGO_WEBHOOK_SECRET)
     console.info(`[Webhook] Event: ${eventType} | mp_event_id=${mpEventId} | signature_valid=${signatureValid}`)
 
     // Deduplication: atomically create event or handle existing
