@@ -1,6 +1,6 @@
 {
 	"servers": {
-		"mercadopago-mcp": {
+		"mercadopago mcp": {
 			"url": "https://mcp.mercadopago.com/mcp",
 			"type": "http"
 		}

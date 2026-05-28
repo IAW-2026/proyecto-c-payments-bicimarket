@@ -1,11 +1,12 @@
 import crypto from 'crypto'
 import { NextResponse } from 'next/server'
+import { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
 import { extractIdempotencyKey, findByIdempotencyKey, checkIdempotency, cacheIdempotencyResponse } from '@/lib/idempotency'
 import { validateServiceTokenBuyer } from '@/lib/service-token'
 import { requireAdmin } from '@/lib/admin-auth'
 import { createCheckoutPreference, MercadoPagoError, MercadoPagoCredentialError } from '@/services/mercado-pago.service'
-import { handleRouteError, badRequest, unauthorized } from '@/lib/errors'
+import { handleRouteError, badRequest } from '@/lib/errors'
 import { createPaymentSchema } from '@/schemas/payment'
 
 export async function GET(req: Request) {

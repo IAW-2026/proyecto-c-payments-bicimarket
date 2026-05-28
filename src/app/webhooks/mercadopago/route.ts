@@ -1,21 +1,23 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { validateMercadoPagoSignature } from '@/lib/webhook-signature'
+import {
+  validatePaymentWebhookSignature,
+  validateMercadoPagoSignature,
+  isTimestampFresh,
+} from '@/lib/webhook-signature'
 import { getPayment as getMpPayment } from '@/services/mercado-pago.service'
 import { notifyBuyerOrderStatus, createSellerSalesOrder } from '@/services/inter-app-client.service'
 import { errorResponse } from '@/lib/errors'
 import type { PaymentMethod } from '@/generated/prisma/client'
 
-function getRawBody(req: Request): Promise<string> {
-  return req.text()
-}
+const MAX_WEBHOOK_AGE_SECONDS = 300
 
 export async function POST(req: Request) {
   const requestId = req.headers.get('x-request-id') || 'unknown'
   console.info(`[Webhook] Received webhook request x-request-id=${requestId}`)
 
   try {
-    const rawBody = await getRawBody(req)
+    const rawBody = await req.text()
     const signature = req.headers.get('x-signature')
     const xRequestId = req.headers.get('x-request-id')
     const url = new URL(req.url)
@@ -38,13 +40,28 @@ export async function POST(req: Request) {
     const notificationDataId = queryDataId || bodyDataId || null
     const eventType = queryTopicType || bodyTopicType
     const mpEventId = payload?.id ? String(payload.id) : `evt_${Date.now()}`
+    const isPaymentTopic = eventType === 'payment' || eventType.includes('payment')
 
-    const signatureValid = validateMercadoPagoSignature(signature, xRequestId, notificationDataId)
+    // Use the appropriate signature validation for the topic
+    let signatureResult: { valid: boolean; ts: string | null }
+    if (isPaymentTopic) {
+      signatureResult = validatePaymentWebhookSignature(signature, notificationDataId, rawBody)
+    } else {
+      signatureResult = validateMercadoPagoSignature(signature, xRequestId, notificationDataId)
+    }
 
-    console.info(`[Webhook] Event: ${eventType} | mp_event_id=${mpEventId} | signature_valid=${signatureValid}`)
+    const signatureValid = signatureResult.valid
+    const sigTs = signatureResult.ts
+
+    // Replay protection: reject notifications older than MAX_WEBHOOK_AGE_SECONDS
+    const tsFresh = sigTs ? isTimestampFresh(sigTs, MAX_WEBHOOK_AGE_SECONDS) : true
+    if (!tsFresh) {
+      console.warn(`[Webhook] Stale timestamp for event ${mpEventId}: ts=${sigTs}`)
+    }
+
+    console.info(`[Webhook] Event: ${eventType} | mp_event_id=${mpEventId} | signature_valid=${signatureValid} | ts_fresh=${tsFresh}`)
 
     // Deduplication: atomically create event or handle existing
-    // The unique constraint on mp_event_id ensures only one request creates the event
     try {
       await prisma.mpWebhookEvent.create({
         data: {
@@ -56,14 +73,12 @@ export async function POST(req: Request) {
         },
       })
     } catch (createErr) {
-      // Duck-type check for Prisma P2002 unique constraint violation
       const isP2002 = createErr instanceof Error
         && 'code' in createErr
         && (createErr as { code: string }).code === 'P2002'
       if (!isP2002) {
-        throw createErr // unexpected error
+        throw createErr
       }
-      // P2002: event already created by another request — look it up
       const existingEvent = await prisma.mpWebhookEvent.findUnique({
         where: { mp_event_id: mpEventId },
       })
@@ -79,7 +94,6 @@ export async function POST(req: Request) {
         console.info(`[Webhook] Duplicate event ${mpEventId} skipped (signature invalid, status=${existingEvent.status})`)
         return NextResponse.json({ received: true, deduplicated: true }, { status: 200 })
       } else {
-        // Previous attempt failed for a transient reason — retry
         console.info(`[Webhook] Re-processing previously failed event ${mpEventId} (status=${existingEvent.status})`)
         await prisma.mpWebhookEvent.update({
           where: { id: existingEvent.id },
@@ -88,24 +102,29 @@ export async function POST(req: Request) {
       }
     }
 
-    if (!signatureValid) {
-      console.warn(`[Webhook] Invalid signature for event ${mpEventId}. Accepting but will not process.`)
-      await prisma.mpWebhookEvent.update({
+    if (!signatureValid || !tsFresh) {
+      const reason = !signatureValid ? 'Invalid signature' : 'Stale timestamp'
+      console.warn(`[Webhook] ${reason} for event ${mpEventId}. Accepting but will not process.`)
+      await prisma.mpWebhookEvent.updateMany({
         where: { mp_event_id: mpEventId },
-        data: { status: 'failed', last_error: 'Invalid signature' },
+        data: { status: 'failed', last_error: reason },
       })
-      return NextResponse.json({ received: true, warning: 'Invalid signature' }, { status: 200 })
+      return NextResponse.json({ received: true, warning: reason }, { status: 200 })
     }
 
     try {
-      await processWebhookEvent(payload)
-      await prisma.mpWebhookEvent.update({
+      if (isPaymentTopic) {
+        await processPaymentEvent(payload)
+      } else {
+        console.info(`[Webhook] Ignoring non-payment event: ${eventType}`)
+      }
+      await prisma.mpWebhookEvent.updateMany({
         where: { mp_event_id: mpEventId },
         data: { status: 'processed', processed_at: new Date() },
       })
     } catch (procErr) {
       console.error(`[Webhook] Processing failed for event ${mpEventId}:`, procErr)
-      await prisma.mpWebhookEvent.update({
+      await prisma.mpWebhookEvent.updateMany({
         where: { mp_event_id: mpEventId },
         data: {
           status: 'failed',
@@ -121,21 +140,18 @@ export async function POST(req: Request) {
   }
 }
 
-async function processWebhookEvent(payload: Record<string, unknown>) {
-  const eventType = (payload?.type as string) || ''
-  const resource = payload?.data ? (payload.data as Record<string, unknown>)?.id as string : undefined
+async function processPaymentEvent(payload: Record<string, unknown>) {
+  const resource = payload?.data
+    ? String((payload.data as Record<string, unknown>).id ?? '')
+    : undefined
 
   if (!resource) {
-    console.warn('[Webhook] No resource ID in payload:', payload?.id)
+    console.warn('[Webhook] No resource ID in payload')
     return
   }
 
-  if (eventType.includes('payment')) {
-    console.info(`[Webhook] Processing payment event: ${eventType} | resource=${resource}`)
-    await handlePaymentEvent(resource)
-  } else {
-    console.info(`[Webhook] Ignoring non-payment event: ${eventType}`)
-  }
+  console.info(`[Webhook] Processing payment event | resource=${resource}`)
+  await handlePaymentEvent(resource)
 }
 
 async function handlePaymentEvent(mpPaymentId: string) {
@@ -158,7 +174,7 @@ async function handlePaymentEvent(mpPaymentId: string) {
   // 1. By gateway_reference (MP payment ID stored on our payment)
   // 2. By external_reference (our payment ID stored in MP preference)
   // 3. By preference ID in gateway_reference (for sandbox fallback)
-  let payment = await prisma.payment.findFirst({
+  const payment = await prisma.payment.findFirst({
     where: {
       OR: [
         { gateway_reference: mpPayment.id },
