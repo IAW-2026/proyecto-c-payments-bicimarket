@@ -1,5 +1,13 @@
 import axios, { AxiosError } from 'axios'
 
+// SDK de Mercado Pago
+import { MercadoPagoConfig, Preference } from 'mercadopago';
+// Agrega credenciales
+
+function getMpClient() {
+  return new MercadoPagoConfig({ accessToken: getAccessToken() })
+}
+
 const MP_API = 'https://api.mercadopago.com'
 
 export class MercadoPagoError extends Error {
@@ -26,32 +34,27 @@ function isSandboxMode(): boolean {
 }
 
 function getAccessToken(): string {
-  const token = isSandboxMode()
-    ? (process.env.MERCADOPAGO_SANDBOX_ACCESS_TOKEN || process.env.MERCADOPAGO_ACCESS_TOKEN)
-    : process.env.MERCADOPAGO_ACCESS_TOKEN
+  const token = process.env.MERCADOPAGO_ACCESS_TOKEN 
   if (!token) {
-    const varName = isSandboxMode() ? 'MERCADOPAGO_SANDBOX_ACCESS_TOKEN (or MERCADOPAGO_ACCESS_TOKEN)' : 'MERCADOPAGO_ACCESS_TOKEN'
-    throw new MercadoPagoCredentialError(`${varName} is not configured`)
+    console.warn(`[MP] MERCADOPAGO_ACCESS_TOKEN is not configured. API calls will fail.`)
   }
-  return token
+  return token || ''
 }
 
 function getPublicKey(): string {
-  const key = isSandboxMode()
-    ? (process.env.MERCADOPAGO_SANDBOX_PUBLIC_KEY || process.env.MERCADOPAGO_PUBLIC_KEY)
-    : process.env.MERCADOPAGO_PUBLIC_KEY
+  const key = process.env.MERCADOPAGO_PUBLIC_KEY
   if (!key) {
-    const varName = isSandboxMode() ? 'MERCADOPAGO_SANDBOX_PUBLIC_KEY (or MERCADOPAGO_PUBLIC_KEY)' : 'MERCADOPAGO_PUBLIC_KEY'
-    console.warn(`[MP] ${varName} is not configured - SDK initialization may fail`)
+    console.warn(`[MP] MERCADOPAGO_PUBLIC_KEY is not configured. Client-side operations may fail.`)
   }
   return key || ''
 }
 
-function getWebhookUrl(): string | undefined {
-  if (isSandboxMode()) {
-    return process.env.MERCADOPAGO_SANDBOX_WEBHOOK_URL || process.env.MERCADOPAGO_WEBHOOK_URL || undefined
+function getWebhookUrl(): string {
+  const url = process.env.MERCADOPAGO_WEBHOOK_URL
+  if (!url) {
+    console.warn(`[MP] MERCADOPAGO_WEBHOOK_URL is not configured. Webhook notifications will not be received.`)
   }
-  return process.env.MERCADOPAGO_WEBHOOK_URL || undefined
+  return url || ''
 }
 
 function api() {
@@ -111,7 +114,13 @@ export interface CheckoutPreferenceInput {
   amount_cents: number
   external_reference: string
   buyer_email?: string
-  items: Array<{ title: string; quantity: number; unit_price_cents: number; description?: string }>
+  items: Array<{
+    id: string
+    title: string
+    quantity: number
+    unit_price_cents: number
+    description?: string
+  }>
   return_urls?: {
     success?: string
     failure?: string
@@ -155,70 +164,40 @@ export interface MpRefundResult {
 
 export async function createCheckoutPreference(input: CheckoutPreferenceInput): Promise<CheckoutPreferenceResult> {
   try {
-    const amount = input.amount_cents / 100
-    const sandboxMode = isSandboxMode()
+    const preference = new Preference(getMpClient())
 
-    const items = input.items.length > 0
-      ? input.items.map((item) => ({
-          title: item.title,
-          quantity: item.quantity,
-          unit_price: item.unit_price_cents / 100,
-          currency_id: 'ARS',
-          description: item.description || '',
-        }))
-      : [{ title: 'Compra BiciMarket', quantity: 1, unit_price: amount, currency_id: 'ARS' }]
+    const items = input.items.map((item) => ({
+      id: item.id,
+      title: item.title,
+      quantity: item.quantity,
+      unit_price: item.unit_price_cents / 100,
+      description: item.description || '',
+      currency_id: 'ARS',
+    }))
 
-    const hasReturnUrls = !!(input.return_urls?.success || input.return_urls?.failure || input.return_urls?.pending)
-
-    const body: Record<string, unknown> = {
-      items,
-      external_reference: input.external_reference,
-      ...(hasReturnUrls ? {
-        auto_return: 'approved',
-        back_urls: {
-          ...(input.return_urls?.success ? { success: input.return_urls.success } : {}),
-          ...(input.return_urls?.failure ? { failure: input.return_urls.failure } : {}),
-          ...(input.return_urls?.pending ? { pending: input.return_urls.pending } : {}),
+    const result = await preference.create({
+      body: {
+        items,
+        external_reference: input.external_reference,
+        notification_url: getWebhookUrl() || undefined,
+        payer: {
+          email: input.buyer_email || 'test_user@testuser.com',
         },
-      } : {}),
-      notification_url: getWebhookUrl(),
-      metadata: {
-        sandbox_mode: sandboxMode,
-        platform: 'bicimarket-payments',
+        back_urls: input.return_urls
+          ? {
+              success: input.return_urls.success,
+              failure: input.return_urls.failure,
+              pending: input.return_urls.pending,
+            }
+          : undefined,
+        auto_return: input.return_urls ? 'approved' : undefined,
       },
-      payment_methods: {
-        excluded_payment_types: [{ id: 'ticket' }, { id: 'atm' }],
-        installments: 12,
-        default_installments: 1,
-      },
-      statement_descriptor: 'BICIMARKET',
-    }
-
-    body.payer = {
-      email: input.buyer_email || 'test_user@testuser.com',
-    }
-
-    if (!sandboxMode) {
-      (body.payer as Record<string, unknown>).identification = {
-        type: 'DNI',
-        number: '12345678',
-      }
-    }
-
-    console.debug(`[MP] Creating preference | sandbox=${sandboxMode} | amount=${amount} | ext_ref=${input.external_reference}`)
-    console.debug('[MP] preference body:', JSON.stringify(body, null, 2))
-
-    const { data } = await api().post('/checkout/preferences', body)
-
-    const initPoint = data.init_point
-
-    console.info(`[MP] Preference created: ${data.id} | sandbox=${sandboxMode} | has_init_point=${!!data.init_point}}`)
-    console.info(`[MP] Using init_point: ${initPoint ? initPoint.substring(0, 80) + '...' : 'MISSING!'}`)
+    })
 
     return {
-      id: data.id,
-      init_point: initPoint || data.init_point,
-      sandbox_mode: sandboxMode,
+      id: String(result.id),
+      init_point: result.init_point || result.sandbox_init_point || '',
+      sandbox_mode: isSandboxMode(),
     }
   } catch (err) {
     return handleMpError(err, 'create preference')

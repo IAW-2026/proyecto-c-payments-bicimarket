@@ -1,10 +1,11 @@
 "use client"
 
-import { useState, useCallback } from "react"
+import { useEffect, useRef, useState, useCallback } from "react"
 import { useMutation } from "@tanstack/react-query"
 import axios from "axios"
 import { AlertCircle, CheckCircle, ExternalLink, Loader2, ShoppingCart, XCircle, Clock, Bug } from "lucide-react"
 import type { PaymentResponse } from "@/types/payments"
+import { initMercadoPago, Wallet } from '@mercadopago/sdk-react'
 
 function useQueryParam(name: string): string | null {
   if (typeof window === 'undefined') return null
@@ -16,11 +17,21 @@ export default function MockCheckoutPage() {
   const [email, setEmail] = useState("test_user_123@testuser.com")
   const [title, setTitle] = useState("Bicicleta Trek Marlin 5")
   const [amount, setAmount] = useState("500.00")
+  const mpInitializedRef = useRef(false)
 
   const result = useQueryParam('result')
   const paymentId = useQueryParam('payment_id')
   const collectionId = useQueryParam('collection_id')
   const preferenceWarning = useQueryParam('preference_warning')
+
+  const publicKey = process.env.NEXT_PUBLIC_MERCADOPAGO_PUBLIC_KEY
+
+  useEffect(() => {
+    if (!publicKey || mpInitializedRef.current) return
+
+    initMercadoPago(publicKey)
+    mpInitializedRef.current = true
+  }, [publicKey])
 
   const mutation = useMutation<PaymentResponse, Error>({
     mutationFn: async () => {
@@ -52,7 +63,9 @@ export default function MockCheckoutPage() {
 
   const payment = mutation.data?.data
   const checkoutUrl = payment?.checkout_url
+  const preferenceId = payment?.gateway_reference
   const warning = payment?.preference_warning || preferenceWarning
+  const canRenderWallet = Boolean(publicKey && preferenceId)
 
   // Use window.location.href for same-window redirect to maintain cookies
   const handleRedirectCheckout = useCallback(() => {
@@ -143,6 +156,18 @@ export default function MockCheckoutPage() {
             />
           </div>
 
+          {!publicKey && (
+            <div className="alert info">
+              <AlertCircle className="ic" size={16} />
+              <div>
+                <div className="a-title">Falta la public key del frontend</div>
+                <div className="a-body">
+                  Definí <strong>NEXT_PUBLIC_MERCADOPAGO_PUBLIC_KEY</strong> para poder inicializar el SDK de Mercado Pago en el navegador.
+                </div>
+              </div>
+            </div>
+          )}
+
           <button
             className="btn btn-primary btn-lg"
             style={{ justifyContent: "center", marginTop: 4 }}
@@ -188,6 +213,11 @@ export default function MockCheckoutPage() {
                     Sandbox: {checkoutUrl.includes('sandbox') ? '✅' : '❌'}
                   </span>
                 </div>
+                {canRenderWallet && preferenceId && (
+                  <div style={{ marginTop: 12 }}>
+                    <Wallet initialization={{ preferenceId }} />
+                  </div>
+                )}
                 <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
                   <button
                     onClick={handleRedirectCheckout}

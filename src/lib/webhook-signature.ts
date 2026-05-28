@@ -70,13 +70,13 @@ function constantTimeEqualsHex(expectedHex: string, receivedHex: string): boolea
 
 /**
  * Validate signature for payment topic webhooks.
- * Message format: {data.id}.{ts}.{raw_body}
+ * Manifest format: id:{data.id};request-id:{x-request-id};ts:{ts};
  * Source: https://www.mercadopago.com.ar/developers/en/docs/checkout-pro/payment-notifications
  */
 export function validatePaymentWebhookSignature(
   signatureHeader: string | null,
+  xRequestId: string | null,
   dataId: string | null,
-  rawBody: string,
 ): { valid: boolean; ts: string | null } {
   if (!signatureHeader) {
     console.warn('[WebhookSignature] Missing x-signature header')
@@ -100,14 +100,14 @@ export function validatePaymentWebhookSignature(
     return { valid: false, ts: parsed.ts }
   }
 
-  const message = `${dataId.toLowerCase()}.${parsed.ts}.${rawBody}`
-  const expectedSignature = computeHmacSha256Hex(secret, message)
+  const manifest = buildSignatureManifest(dataId, xRequestId, parsed.ts)
+  const expectedSignature = computeHmacSha256Hex(secret, manifest)
 
   if (constantTimeEqualsHex(expectedSignature, parsed.v1)) {
     return { valid: true, ts: parsed.ts }
   }
 
-  console.warn('[WebhookSignature] Signature mismatch for payment topic')
+  console.warn(`[WebhookSignature] Signature mismatch. Generated manifest: "${manifest}"`)
   return { valid: false, ts: parsed.ts }
 }
 

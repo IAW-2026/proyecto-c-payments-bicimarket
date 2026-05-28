@@ -45,7 +45,7 @@ export async function POST(req: Request) {
     // Use the appropriate signature validation for the topic
     let signatureResult: { valid: boolean; ts: string | null }
     if (isPaymentTopic) {
-      signatureResult = validatePaymentWebhookSignature(signature, notificationDataId, rawBody)
+      signatureResult = validatePaymentWebhookSignature(signature, xRequestId, notificationDataId)
     } else {
       signatureResult = validateMercadoPagoSignature(signature, xRequestId, notificationDataId)
     }

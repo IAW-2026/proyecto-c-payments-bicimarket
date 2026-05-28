@@ -132,6 +132,7 @@ export async function POST(req: Request) {
         external_reference: payment.id,
         buyer_email: validated.buyer_email,
         items: validated.items_summary?.map((item) => ({
+          id: item.seller_profile_id,
           title: `Seller ${item.seller_profile_id}`,
           quantity: 1,
           unit_price_cents: item.subtotal_cents + item.shipping_cost_cents,
