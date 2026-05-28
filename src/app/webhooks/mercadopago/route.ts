@@ -19,7 +19,8 @@ export async function POST(req: Request) {
     const signature = req.headers.get('x-signature')
     const xRequestId = req.headers.get('x-request-id')
     const url = new URL(req.url)
-    const dataId = url.searchParams.get('data.id') || url.searchParams.get('id')
+    const queryDataId = url.searchParams.get('data.id')
+    const queryTopicType = url.searchParams.get('type')
 
     let payload: Record<string, unknown>
     try {
@@ -32,12 +33,13 @@ export async function POST(req: Request) {
     const bodyDataId = payload?.data && typeof payload.data === 'object'
       ? String((payload.data as Record<string, unknown>).id ?? '')
       : ''
-    const notificationDataId = dataId || bodyDataId || null
+    const bodyTopicType = (payload?.type as string) || 'unknown'
+
+    const notificationDataId = queryDataId || bodyDataId || null
+    const eventType = queryTopicType || bodyTopicType
+    const mpEventId = payload?.id ? String(payload.id) : `evt_${Date.now()}`
 
     const signatureValid = validateMercadoPagoSignature(signature, xRequestId, notificationDataId)
-
-    const mpEventId = payload?.id ? String(payload.id) : `evt_${Date.now()}`
-    const eventType = (payload?.type as string) || 'unknown'
 
     console.info(`[Webhook] Event: ${eventType} | mp_event_id=${mpEventId} | signature_valid=${signatureValid}`)
 
@@ -74,7 +76,6 @@ export async function POST(req: Request) {
         console.info(`[Webhook] Duplicate event ${mpEventId} currently being processed, skipping`)
         return NextResponse.json({ received: true, deduplicated: true }, { status: 200 })
       } else if (!existingEvent.signature_valid) {
-        // Signature was already invalid — will never pass, skip retry
         console.info(`[Webhook] Duplicate event ${mpEventId} skipped (signature invalid, status=${existingEvent.status})`)
         return NextResponse.json({ received: true, deduplicated: true }, { status: 200 })
       } else {

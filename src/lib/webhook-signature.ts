@@ -18,33 +18,39 @@ export function parseSignatureHeader(header: string): SignatureParts | null {
   return { ts: parts.ts, v1: parts.v1 }
 }
 
-function computeHmacSha256Hex(key: string | Buffer, data: string): string {
+function computeHmacSha256Hex(key: string, data: string): string {
   return crypto
     .createHmac('sha256', key)
     .update(data, 'utf8')
     .digest('hex')
 }
 
-function buildSignatureManifest(dataId: string, xRequestId: string, ts: string): string {
-  return `id:${dataId};request-id:${xRequestId};ts:${ts};`
-}
-
-function normalizeMercadoPagoDataId(dataId: string): string {
-  return /[a-z]/i.test(dataId) ? dataId.toLowerCase() : dataId
+// FIXED: Dynamically strips keys if their corresponding values are missing
+function buildSignatureManifest(dataId: string | null, xRequestId: string | null, ts: string): string {
+  let manifest = '';
+  
+  if (dataId) {
+    // Mercado Pago explicitly demands data.id to be lowercased in the template string
+    manifest += `id:${dataId.toLowerCase()};`;
+  }
+  if (xRequestId && xRequestId.trim() !== '') {
+    manifest += `request-id:${xRequestId};`;
+  }
+  
+  manifest += `ts:${ts};`;
+  return manifest;
 }
 
 function constantTimeEqualsHex(expectedHex: string, receivedHex: string): boolean {
   if (!/^[0-9a-f]+$/i.test(expectedHex) || !/^[0-9a-f]+$/i.test(receivedHex)) {
     return false
   }
-
   const expected = Buffer.from(expectedHex, 'hex')
   const received = Buffer.from(receivedHex, 'hex')
 
   if (expected.length !== received.length) {
     return false
   }
-
   return crypto.timingSafeEqual(expected, received)
 }
 
@@ -70,12 +76,8 @@ export function validateMercadoPagoSignature(
     return false
   }
 
-  if (!dataId) {
-    console.warn('[WebhookSignature] Missing data id for signature validation')
-    return false
-  }
-
-  const manifest = buildSignatureManifest(normalizeMercadoPagoDataId(dataId), xRequestId ?? '', parsed.ts)
+  // Generate the manifest string cleanly using the fixed structure logic
+  const manifest = buildSignatureManifest(dataId, xRequestId, parsed.ts)
   const expectedSignature = computeHmacSha256Hex(secret, manifest)
 
   if (constantTimeEqualsHex(expectedSignature, parsed.v1)) {
@@ -84,7 +86,7 @@ export function validateMercadoPagoSignature(
   }
 
   console.warn(
-    `[WebhookSignature] Signature mismatch dataId=${dataId} xRequestId=${xRequestId ?? ''} ts=${parsed.ts}`
+    `[WebhookSignature] Signature mismatch. Generated manifest: "${manifest}"`
   )
   return false
 }

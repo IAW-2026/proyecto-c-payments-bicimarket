@@ -2,7 +2,7 @@
 
 # dependencies
 /node_modules
-/.vscode
+/.vscod
 /.pnp
 .pnp.*
 .yarn/*
