@@ -32,22 +32,10 @@ function timingSafeEqual(a: Buffer, b: Buffer): boolean {
   return crypto.timingSafeEqual(a, b)
 }
 
-/**
- * Validate Mercado Pago webhook signature.
- *
- * MP webhook signature format (as of 2025):
- *   Header: x-signature: ts=<unix_epoch>,v1=<hmac_sha256_hex>
- *   Header: x-request-id: <uuid>
- *
- * The signed string is built by CONCATENATING (no separators):
- *   {x-request-id}{ts}{body}
- *
- * When x-request-id is absent, only the body is used.
- */
 export function validateMercadoPagoSignature(
-  body: string,
   signatureHeader: string | null,
   xRequestId: string | null,
+  dataId: string | null,
 ): boolean {
   if (!signatureHeader) {
     console.warn('[WebhookSignature] Missing x-signature header')
@@ -66,10 +54,19 @@ export function validateMercadoPagoSignature(
     return false
   }
 
-  // Build the signed string per MP spec:
-  // With x-request-id:  xRequestId + ts + body  (concatenated, NO separator)
-  // Without:            body only (legacy fallback)
-  const signedString = xRequestId ? `${xRequestId}${parsed.ts}${body}` : body
+  // Build the signed template per MP spec:
+  //   id:<data.id_url>;request-id:<x-request-id_header>;ts:<ts_header>;
+  // Remove any segment whose value is not present.
+  const parts: string[] = []
+  if (dataId) {
+    const normalized = /^[a-zA-Z0-9]+$/.test(dataId) ? dataId.toLowerCase() : dataId
+    parts.push(`id:${normalized}`)
+  }
+  if (xRequestId) {
+    parts.push(`request-id:${xRequestId}`)
+  }
+  parts.push(`ts:${parsed.ts}`)
+  const signedString = parts.join(';') + ';'
 
   const expected = computeHmacSha256Hex(secret, signedString)
 

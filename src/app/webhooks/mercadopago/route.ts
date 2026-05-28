@@ -18,8 +18,9 @@ export async function POST(req: Request) {
     const rawBody = await getRawBody(req)
     const signature = req.headers.get('x-signature')
     const xRequestId = req.headers.get('x-request-id')
+    const dataId = new URL(req.url).searchParams.get('data.id')
 
-    const signatureValid = validateMercadoPagoSignature(rawBody, signature, xRequestId)
+    const signatureValid = validateMercadoPagoSignature(signature, xRequestId, dataId)
 
     let payload: Record<string, unknown>
     try {
