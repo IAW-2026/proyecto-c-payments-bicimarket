@@ -23,7 +23,7 @@ export default function CheckoutPage() {
     mutationFn: async () => {
       const amountCents = Math.round(parseFloat(amount) * 100)
       const origin = window.location.origin
-      const { data } = await axios.post('/api/v1/payments', {
+      const { data } = await axios.post('/api/test/checkout', {
         order_id: `order_${Date.now()}`,
         buyer_profile_id: "buyer_demo",
         buyer_clerk_user_id: "user_demo",

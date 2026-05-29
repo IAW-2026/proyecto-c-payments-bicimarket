@@ -154,7 +154,7 @@ export async function POST(req: Request) {
 
     try {
       const mpResp = await mpService.createPreference(preference)
-      const body = (mpResp && (mpResp.body || mpResp)) as any
+      const body = (mpResp && (mpResp as any).body || mpResp) as any
 
       // Record the outbound attempt with raw request/response for auditing
       await prisma.paymentAttempt.create({

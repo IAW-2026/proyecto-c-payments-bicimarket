@@ -1,4 +1,4 @@
-import mercadopago from 'mercadopago'
+import MercadoPagoConfig, { Preference } from 'mercadopago'
 import axios from 'axios'
 
 function getAccessToken(): string | undefined {
@@ -13,24 +13,16 @@ export function getPublicKey(): string | undefined {
   return process.env.MERCADOPAGO_PUBLIC_KEY || process.env.MERCADOPAGO_SANDBOX_PUBLIC_KEY
 }
 
-function ensureConfigured() {
+function getConfig() {
   const token = getAccessToken()
   if (!token) throw new Error('Mercado Pago access token not configured')
-  // The official SDK uses `configurations.setAccessToken`
-  // See: mercadopago npm SDK usage
-  // Configure on-demand to support sandbox/live switching at runtime
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore
-  mercadopago.configure({ access_token: token })
+  return new MercadoPagoConfig({ accessToken: token })
 }
 
 export async function createPreference(preference: Record<string, unknown>) {
-  ensureConfigured()
-  // The SDK returns a promise that resolves with { body, status }
-  // Keep the raw SDK response so callers can inspect init_point and sandbox_init_point
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-ignore
-  const resp = await mercadopago.preferences.create(preference)
+  const config = getConfig()
+  const client = new Preference(config)
+  const resp = await client.create({ body: preference as any })
   return resp
 }
 
