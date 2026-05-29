@@ -41,14 +41,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, reason: 'invalid_signature' }, { status: 400 })
     }
 
-    // Acknowledge receipt. Trigger async processor (non-blocking).
+    // Process the webhook synchronously before responding.
+    // Using setImmediate/fire-and-forget is unreliable in serverless environments
+    // where the runtime may freeze the function after the response is sent.
     try {
-      // Fire-and-forget: processor will update the DB record with fetched MP details
-      setImmediate(() => {
-        void processMpWebhookEvent(mpEventId)
-      })
+      await processMpWebhookEvent(mpEventId)
     } catch (procErr) {
-      console.error('[MP Webhook] Failed to start async processor:', procErr)
+      console.error('[MP Webhook] Processor error:', procErr)
     }
 
     return NextResponse.json({ ok: true })
