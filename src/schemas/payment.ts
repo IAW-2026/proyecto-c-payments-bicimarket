@@ -20,8 +20,8 @@ export const itemsSummarySchema = z.object({
 export const createPaymentSchema = z.object({
   order_id: z.string().min(1, 'order_id is required'),
   buyer_profile_id: z.string().min(1, 'buyer_profile_id is required'),
-  buyer_clerk_user_id: z.string().optional(),
-  buyer_email: z.string().email().optional(),
+  buyer_clerk_user_id: z.string(),
+  buyer_email: z.string().email(),
   amount_cents: z.number().int().positive('amount_cents must be positive'),
   currency: z.string().default('ARS'),
   items_summary: z.array(itemsSummarySchema).optional(),

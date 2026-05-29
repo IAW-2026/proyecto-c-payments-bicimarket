@@ -84,7 +84,7 @@ model Payment {
   id                 String          @id @default(cuid())
   order_id           String
   buyer_profile_id   String
-  buyer_clerk_user_id String?
+  buyer_clerk_user_id String
   amount_cents       Int
   currency           String          @default("ARS")
   status             PaymentStatus   @default(pending)
@@ -113,7 +113,7 @@ model Payment {
 model PaymentStatusHistory {
   id            String          @id @default(cuid())
   payment_id    String
-  payment       Payment         @relation(fields: [payment_id], references: [id], onDelete: Cascade)
+  payment       Payment         @relation(fields: [payment_id], references: [id])
   from_status   PaymentStatus?
   to_status     PaymentStatus
   changed_by    String?         // admin user or "system"
@@ -126,7 +126,7 @@ model PaymentStatusHistory {
 model PaymentAttempt {
   id               String               @id @default(cuid())
   payment_id       String
-  payment          Payment              @relation(fields: [payment_id], references: [id], onDelete: Cascade)
+  payment          Payment              @relation(fields: [payment_id], references: [id])
   attempt_number   Int
   provider         String               @default("mercadopago")
   status           PaymentAttemptStatus @default(pending)
@@ -142,7 +142,7 @@ model PaymentAttempt {
 model Receipt {
   id             String   @id @default(cuid())
   payment_id     String
-  payment        Payment  @relation(fields: [payment_id], references: [id], onDelete: Cascade)
+  payment        Payment  @relation(fields: [payment_id], references: [id])
   receipt_number String
   receipt_url    String
   amount_cents   Int
@@ -154,7 +154,7 @@ model Receipt {
 model Settlement {
   id                    String              @id @default(cuid())
   payment_id            String
-  payment               Payment             @relation(fields: [payment_id], references: [id], onDelete: Cascade)
+  payment               Payment             @relation(fields: [payment_id], references: [id])
   order_id              String
   order_seller_group_id String
   seller_profile_id     String
@@ -178,7 +178,7 @@ model Settlement {
 model SettlementStatusHistory {
   id           String             @id @default(cuid())
   settlement_id String
-  settlement   Settlement         @relation(fields: [settlement_id], references: [id], onDelete: Cascade)
+  settlement   Settlement         @relation(fields: [settlement_id], references: [id])
   from_status  SettlementStatus?
   to_status    SettlementStatus
   changed_by   String?
@@ -191,7 +191,7 @@ model SettlementStatusHistory {
 model Payout {
   id            String       @id @default(cuid())
   settlement_id String
-  settlement    Settlement   @relation(fields: [settlement_id], references: [id], onDelete: Cascade)
+  settlement    Settlement   @relation(fields: [settlement_id], references: [id])
   transfer_id   String?
   status        PayoutStatus @default(pending)
   attempts      Int          @default(0)
@@ -208,7 +208,7 @@ model Payout {
 model Refund {
   id                String       @id @default(cuid())
   payment_id        String
-  payment           Payment      @relation(fields: [payment_id], references: [id], onDelete: Cascade)
+  payment           Payment      @relation(fields: [payment_id], references: [id])
   seller_profile_id String?
   amount_cents      Int
   currency          String       @default("ARS")
@@ -227,7 +227,7 @@ model Refund {
 model RefundStatusHistory {
   id          String       @id @default(cuid())
   refund_id   String
-  refund      Refund       @relation(fields: [refund_id], references: [id], onDelete: Cascade)
+  refund      Refund       @relation(fields: [refund_id], references: [id])
   from_status RefundStatus?
   to_status   RefundStatus
   changed_by  String?
@@ -245,7 +245,6 @@ model IdempotencyKey {
   created_at DateTime @default(now())
   expires_at DateTime?
 
-  @@index([key])
   @@index([created_at])
 }
 

@@ -1,7 +1,5 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 
-// Public routes: API (self-auth), webhooks (MP signature), auth pages, test pages
-// The admin layout component handles the admin metadata check separately
 const isPublicRoute = createRouteMatcher([
   "/",
   "/sign-in(.*)",

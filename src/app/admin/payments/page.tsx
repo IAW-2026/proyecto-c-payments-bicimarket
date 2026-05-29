@@ -8,6 +8,7 @@ import { FilterDropdown } from "@/components/admin/filter-dropdown"
 import { Paginator } from "@/components/admin/paginator"
 import { Icons } from "@/lib/icons"
 import { ARS, formatDate } from "@/lib/currency"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { usePayments } from "@/hooks/use-payments"
 import { useToast } from "@/hooks/use-toast"
 import type { PaymentFilters } from "@/types/filters"
@@ -39,6 +40,7 @@ export default function PaymentsPage() {
   const paymentsQuery = usePayments(filters)
   const payments = paymentsQuery.data?.data ?? []
   const pagination = paymentsQuery.data?.pagination ?? { page: 1, limit: 20, total: 0, has_more: false }
+  const paymentStatusLabels: Record<string, string> = { approved: "aprobado", pending: "pendiente", rejected: "rechazado", cancelled: "cancelado", refunded: "reembolsado" }
 
   const toggleSelect = (id: string) => {
     const next = new Set(selected)
@@ -58,9 +60,10 @@ export default function PaymentsPage() {
     toast({ description: "ID copiado al portapapeles" })
   }
 
-  const exportCsv = () => {
+  const exportCsv = (onlySelected = false) => {
+    const items = onlySelected ? payments.filter((p) => selected.has(p.id)) : payments
     const header = ["id", "order_id", "buyer_profile_id", "amount_cents", "status", "created_at"].join(",")
-    const rows = payments.map((p) =>
+    const rows = items.map((p) =>
       [p.id, p.order_id, p.buyer_profile_id, p.amount_cents, p.status, p.created_at]
         .map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","),
     )
@@ -74,21 +77,23 @@ export default function PaymentsPage() {
 
   const statusChips = [
     { label: "todos", value: "" },
-    { label: "approved", value: "approved" },
-    { label: "pending", value: "pending" },
-    { label: "rejected", value: "rejected" },
-    { label: "cancelled", value: "cancelled" },
+    { label: "aprobado", value: "approved" },
+    { label: "pendiente", value: "pending" },
+    { label: "rechazado", value: "rejected" },
+    { label: "cancelado", value: "cancelled" },
   ]
 
   return (
-    <AdminShell active="payments" crumbs={["Admin", "Payments"]}>
-      <div className="page-header">
+    <AdminShell active="payments" crumbs={["Admin", "Pagos"]}>
+      <div className="page-layout">
+        <div className="page-header">
         <div>
-          <h1 className="page-title">Payments</h1>
+          <h1 className="page-title">Pagos</h1>
           <p className="page-sub">Todos los cobros iniciados desde Buyer App. El estado real se resuelve vía Mercado Pago.</p>
         </div>
         <div className="btn-group">
-          <button className="btn btn-secondary" onClick={exportCsv}><Icons.Download /> Exportar CSV</button>
+          <button className="btn btn-secondary" onClick={() => paymentsQuery.refetch()} disabled={paymentsQuery.isFetching}>{paymentsQuery.isFetching ? <><Icons.Retry /> Refrescando…</> : <><Icons.Retry /> Refrescar</>}</button>
+          <button className="btn btn-secondary" onClick={() => exportCsv()}><Icons.Download /> Exportar</button>
         </div>
       </div>
 
@@ -111,7 +116,7 @@ export default function PaymentsPage() {
       </div>
 
       <div className="card">
-        <div className="table-wrapper">
+        <ScrollArea>
           <table className="t">
             <thead>
               <tr>
@@ -120,18 +125,18 @@ export default function PaymentsPage() {
                     {selected.size === payments.length ? <Icons.Check /> : selected.size > 0 ? <Icons.Minus /> : null}
                   </span>
                 </th>
-                <th>Payment ID</th>
-                <th>Order ID</th>
+                <th>ID</th>
+                <th>Orden</th>
                 <th className="num"><span className="sort-h">Monto <Icons.Down /></span></th>
                 <th>Estado</th>
                 <th>Método</th>
                 <th><span className="sort-h">Fecha <Icons.Down /></span></th>
-                <th>MP ref</th>
+                <th>Ref. MP</th>
                 <th className="actions-cell"></th>
               </tr>
             </thead>
             <tbody>
-              {paymentsQuery.isLoading ? (
+              {paymentsQuery.isFetching ? (
                 <tr><td colSpan={9}>{[0, 1, 2, 3, 4].map((i) => <div key={i} className="sk" style={{ width: "100%", height: 20, margin: 8 }} />)}</td></tr>
               ) : payments.length === 0 ? (
                 <tr>
@@ -154,7 +159,7 @@ export default function PaymentsPage() {
                     </td>
                     <td className="id">{p.order_id.slice(0, 18)}…</td>
                     <td className="num tnum" style={{ fontWeight: 500 }}>{ARS(p.amount_cents)}</td>
-                    <td><span className={`badge ${p.status}`}><span className="dot" />{p.status}</span></td>
+                    <td><span className={`badge ${p.status}`}><span className="dot" />{paymentStatusLabels[p.status] ?? p.status}</span></td>
                     <td className="muted" style={{ fontSize: 12.5 }}>{p.method ?? p.buyer_profile_id.slice(0, 10)}…</td>
                     <td className="muted mono" style={{ fontSize: 12 }}>{formatDate(p.created_at)}</td>
                     <td className="id">{p.gateway_reference?.slice(0, 14) ?? <span className="muted">—</span>}…</td>
@@ -166,7 +171,7 @@ export default function PaymentsPage() {
               )}
             </tbody>
           </table>
-        </div>
+        </ScrollArea>
         <Paginator
           page={page}
           total={pagination.total}
@@ -183,9 +188,10 @@ export default function PaymentsPage() {
           <span>·</span>
           <span>Total seleccionado: <span className="tnum" style={{ color: "var(--foreground)", fontWeight: 600 }}>{ARS(selectedTotal)}</span></span>
           <span>·</span>
-          <button className="btn btn-secondary btn-sm" onClick={exportCsv}>Exportar selección</button>
+          <button className="btn btn-secondary btn-sm" onClick={() => exportCsv(true)}>Exportar selección</button>
         </div>
       )}
+      </div>
     </AdminShell>
   )
 }

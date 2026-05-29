@@ -16,7 +16,7 @@ export function getPublicKey(): string | undefined {
 function getConfig() {
   const token = getAccessToken()
   if (!token) throw new Error('Mercado Pago access token not configured')
-  return new MercadoPagoConfig({ accessToken: token })
+  return new MercadoPagoConfig({ accessToken: token, options: { timeout: 10000 } })
 }
 
 export async function createPreference(preference: Record<string, unknown>) {
@@ -36,7 +36,7 @@ export async function fetchPaymentDetails(paymentId: string) {
 
   const base = 'https://api.mercadopago.com'
   const url = `${base}/v1/payments/${encodeURIComponent(paymentId)}`
-  const resp = await axios.get(url, { headers: { Authorization: `Bearer ${token}` } })
+  const resp = await axios.get(url, { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 })
   return resp.data
 }
 
@@ -57,6 +57,7 @@ export async function createRefund(paymentId: string, amountCents?: number) {
   }
   const resp = await axios.post(url, body, {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    timeout: 10000,
   })
   return resp.data
 }

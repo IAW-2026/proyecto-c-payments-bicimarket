@@ -1,11 +1,13 @@
 "use client"
 
+import Link from "next/link"
 import { useMemo, useState } from "react"
 
 import { AdminShell } from "@/components/admin/admin-shell"
 import { Paginator } from "@/components/admin/paginator"
 import { Icons } from "@/lib/icons"
 import { ARS, formatDate } from "@/lib/currency"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { usePayouts } from "@/hooks/use-settlements"
 import { useToast } from "@/hooks/use-toast"
 import type { PayoutFilters } from "@/types/filters"
@@ -15,6 +17,7 @@ function copy(text: string) { navigator.clipboard.writeText(text) }
 export default function PayoutsPage() {
   const { toast } = useToast()
   const [page, setPage] = useState(1)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const [tab, setTab] = useState("queue")
 
   const filters = useMemo<PayoutFilters>(() => ({ page, limit: 20 }), [page])
@@ -23,6 +26,17 @@ export default function PayoutsPage() {
 
   const payouts = payoutsQuery.data?.data ?? []
   const pagination = payoutsQuery.data?.pagination ?? { page: 1, limit: 20, total: 0, has_more: false }
+
+  const toggleSelect = (id: string) => {
+    const next = new Set(selected)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    setSelected(next)
+  }
+
+  const selectAll = () => {
+    if (selected.size === payouts.length) setSelected(new Set())
+    else setSelected(new Set(payouts.map((p) => p.id)))
+  }
 
   const failed = payouts.filter((p) => p.status === "failed" || p.status === "manual_review")
   const scheduled = payouts.filter((p) => p.status === "pending")
@@ -46,9 +60,10 @@ export default function PayoutsPage() {
     toast({ description: "ID copiado al portapapeles" })
   }
 
-  const exportCsv = () => {
+  const exportCsv = (onlySelected = false) => {
+    const items = onlySelected ? payouts.filter((p) => selected.has(p.id)) : payouts
     const header = ["id", "settlement_id", "status", "created_at"].join(",")
-    const rows = payouts.map((p) =>
+    const rows = items.map((p) =>
       [p.id, p.settlement_id, p.status, p.created_at]
         .map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","),
     )
@@ -59,14 +74,16 @@ export default function PayoutsPage() {
   }
 
   return (
-    <AdminShell active="payouts" crumbs={["Admin", "Payouts"]}>
-      <div className="page-header">
+    <AdminShell active="payouts" crumbs={["Admin", "Pagos a vendedores"]}>
+      <div className="page-layout">
+        <div className="page-header">
         <div>
-          <h1 className="page-title">Payouts</h1>
-          <p className="page-sub">Registro de payouts generados. Finanzas los procesa externamente contra Mercado Pago.</p>
+          <h1 className="page-title">Pagos a vendedores</h1>
+          <p className="page-sub">Registro de pagos generados. Finanzas los procesa externamente contra Mercado Pago.</p>
         </div>
         <div className="btn-group">
-          <button className="btn btn-secondary" onClick={exportCsv}><Icons.Download /> Exportar</button>
+          <button className="btn btn-secondary" onClick={() => payoutsQuery.refetch()} disabled={payoutsQuery.isFetching}>{payoutsQuery.isFetching ? <><Icons.Retry /> Refrescando…</> : <><Icons.Retry /> Refrescar</>}</button>
+          <button className="btn btn-secondary" onClick={() => exportCsv()}><Icons.Download /> Exportar</button>
         </div>
       </div>
 
@@ -74,7 +91,7 @@ export default function PayoutsPage() {
         <div className="card kpi"><div className="label">Pendientes</div><div className="v tnum">{totals.pending}</div><div className="muted" style={{ fontSize: 12, marginTop: 6 }}>{ARS(totals.pendingAmount)}</div></div>
         <div className="card kpi"><div className="label">En curso</div><div className="v tnum">{totals.inProgress}</div><div className="muted" style={{ fontSize: 12, marginTop: 6 }}>{ARS(totals.inProgressAmount)}</div></div>
         <div className="card kpi"><div className="label">Completados</div><div className="v tnum">{completed.length}</div></div>
-        <div className="card kpi"><div className="label">Manual review</div><div className="v tnum" style={{ color: "oklch(0.50 0.18 305)" }}>{failed.length}</div><div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Requieren acción</div></div>
+        <div className="card kpi"><div className="label">Revisión manual</div><div className="v tnum" style={{ color: "oklch(0.50 0.18 305)" }}>{failed.length}</div><div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Requieren acción</div></div>
       </div>
 
       <div className="tabs" style={{ marginBottom: 16 }}>
@@ -87,36 +104,44 @@ export default function PayoutsPage() {
         <div className="card-head" style={{ justifyContent: "space-between" }}>
           <h2 className="sec-title">{tab === "attention" ? "Fallidos" : tab === "history" ? "Completados" : "Cola de pagos"}</h2>
         </div>
-        <div className="table-wrapper">
+        <ScrollArea>
           <table className="t">
             <thead>
               <tr>
-                <th className="checkbox-cell"><span className="cb" /></th>
-                <th>Payout ID</th>
-                <th>Settlement</th>
-                <th>Status</th>
+                <th className="checkbox-cell">
+                  <span className={`cb ${selected.size > 0 ? (selected.size === displayedPayouts.length ? "checked" : "indeterminate") : ""}`} onClick={selectAll}>
+                    {selected.size === displayedPayouts.length ? <Icons.Check /> : selected.size > 0 ? <Icons.Minus /> : null}
+                  </span>
+                </th>
+                <th>ID</th>
+                <th>Liquidación</th>
+                <th>Estado</th>
                 <th className="num">Monto</th>
                 <th className="actions-cell"></th>
               </tr>
             </thead>
             <tbody>
-                {payoutsQuery.isLoading ? (
+                {payoutsQuery.isFetching ? (
                   <tr><td colSpan={6}>{[0, 1, 2].map((i) => <div key={i} className="sk" style={{ width: "100%", height: 20, margin: 8 }} />)}</td></tr>
                 ) : displayedPayouts.length === 0 ? (
                   <tr>
                     <td colSpan={6} className="empty">
                       <div className="icon-wrap"><Icons.Send /></div>
-                      <div className="t">No hay payouts</div>
-                      <div className="s">Los payouts aparecen cuando los settlements se generan.</div>
+                    <div className="t">No hay pagos</div>
+                    <div className="s">Los pagos aparecen cuando las liquidaciones se generan.</div>
                     </td>
                   </tr>
                 ) : (
                   displayedPayouts.map((p) => (
-                  <tr key={p.id}>
-                    <td className="checkbox-cell"><span className="cb" /></td>
-                    <td className="id"><span className="row-link">{p.id}</span></td>
+                  <tr key={p.id} className={selected.has(p.id) ? "row-selected" : ""}>
+                    <td className="checkbox-cell">
+                      <span className={`cb ${selected.has(p.id) ? "checked" : ""}`} onClick={() => toggleSelect(p.id)}>
+                        {selected.has(p.id) ? <Icons.Check /> : null}
+                      </span>
+                    </td>
+                    <td className="id"><Link href={`/admin/payouts/${p.id}`} className="row-link">{p.id}</Link></td>
                     <td className="id">{p.settlement_id.slice(0, 14)}…</td>
-                    <td><span className={`badge ${p.status}`}><span className="dot" />{p.status}</span></td>
+                    <td><span className={`badge ${p.status}`}><span className="dot" />{{ pending: "pendiente", in_progress: "en curso", completed: "completado", failed: "fallido", manual_review: "revisión manual" }[p.status] ?? p.status}</span></td>
                     <td className="num tnum" style={{ fontWeight: 500 }}>{ARS(p.settlement?.gross_amount_cents ?? 0)}</td>
                     <td className="actions-cell"><span className="icon-btn" onClick={() => handleCopy(p.id)} title="Copiar ID"><Icons.Copy /></span></td>
                   </tr>
@@ -124,15 +149,23 @@ export default function PayoutsPage() {
               )}
             </tbody>
           </table>
-        </div>
+        </ScrollArea>
         <Paginator
           page={page}
-          total={displayedPayouts.length}
+          total={pagination.total}
           pageSize={20}
           hasMore={pagination.has_more}
           onPrev={() => setPage((c) => Math.max(1, c - 1))}
           onNext={() => setPage((c) => c + 1)}
         />
+      </div>
+      {selected.size > 0 && (
+        <div className="row gap-3 muted" style={{ marginTop: 14, fontSize: 12.5, flexWrap: "wrap" }}>
+          <span>{selected.size} seleccionados</span>
+          <span>·</span>
+          <button className="btn btn-secondary btn-sm" onClick={() => exportCsv(true)}>Exportar selección</button>
+        </div>
+      )}
       </div>
     </AdminShell>
   )

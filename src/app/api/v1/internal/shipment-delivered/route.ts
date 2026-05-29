@@ -4,7 +4,6 @@ import { validateServiceTokenShipping } from '@/lib/service-token'
 import { calculateSettlementAmounts } from '@/services/settlement.service'
 import { notifySellerPaymentStatus } from '@/services/inter-app-client.service'
 import { handleRouteError, badRequest, notFound, unauthorized } from '@/lib/errors'
-import { validateSettlementTransition } from '@/lib/state-machines/settlement'
 
 export async function POST(req: Request) {
   try {
@@ -35,26 +34,9 @@ export async function POST(req: Request) {
     })
 
     if (settlement) {
-      validateSettlementTransition(settlement.status, 'paid')
-
-      settlement = await prisma.$transaction(async (tx) => {
-        const updated = await tx.settlement.update({
-          where: { id: settlement!.id },
-          data: { status: 'paid', paid_at: new Date(delivered_at) },
-        })
-
-        await tx.settlementStatusHistory.create({
-          data: {
-            settlement_id: updated.id,
-            from_status: settlement!.status,
-            to_status: 'paid',
-            changed_by: 'system',
-            reason: 'Shipment delivered',
-          },
-        })
-
-        return updated
-      })
+      // Settlement already exists; keep it as pending until payout is processed.
+      // Do NOT auto-mark paid — that happens via payout or admin action.
+      console.log(`[ShipmentDelivered] Settlement ${settlement.id} already exists (status=${settlement.status}), skipping creation`)
     } else {
       settlement = await prisma.settlement.create({
         data: {
@@ -80,11 +62,11 @@ export async function POST(req: Request) {
       })
     }
 
-    try {
-      await notifySellerPaymentStatus(sales_order_id, 'paid', settlement.id)
-    } catch (err) {
-      console.error('Failed to notify seller of payment status:', err)
-    }
+    // try {
+    //   await notifySellerPaymentStatus(sales_order_id, 'paid', settlement.id)
+    // } catch (err) {
+    //   console.error('Failed to notify seller of payment status:', err)
+    // }
 
     return NextResponse.json({ received: true, settlement_id: settlement.id }, { status: 200 })
   } catch (err) {
@@ -93,22 +75,21 @@ export async function POST(req: Request) {
 }
 
 function getSellerAmountFromPayment(payment: { amount_cents: number; items_summary: unknown }, sellerProfileId: string): { gross: number; fee: number; net: number } {
-  if (payment.items_summary && Array.isArray(payment.items_summary)) {
-    const sellerItem = (payment.items_summary as Array<{
-      seller_profile_id: string
-      subtotal_cents: number
-      shipping_cost_cents: number
-    }>).find(item => item.seller_profile_id === sellerProfileId)
-
-    if (sellerItem) {
-      const gross = sellerItem.subtotal_cents + sellerItem.shipping_cost_cents
-      const amounts = calculateSettlementAmounts(gross, 10)
-      return amounts
-    }
+  if (!payment.items_summary || !Array.isArray(payment.items_summary)) {
+    throw new Error(`Cannot calculate settlement: items_summary missing for payment. seller=${sellerProfileId}`)
   }
 
-  const singleSellerGross = Math.round(payment.amount_cents / 2)
-  const amounts = calculateSettlementAmounts(singleSellerGross, 10)
-  console.warn(`No items_summary for seller ${sellerProfileId}, using estimated amount ${singleSellerGross}`)
+  const sellerItem = (payment.items_summary as Array<{
+    seller_profile_id: string
+    subtotal_cents: number
+    shipping_cost_cents: number
+  }>).find(item => item.seller_profile_id === sellerProfileId)
+
+  if (!sellerItem) {
+    throw new Error(`Cannot calculate settlement: seller ${sellerProfileId} not found in payment items_summary`)
+  }
+
+  const gross = sellerItem.subtotal_cents + sellerItem.shipping_cost_cents
+  const amounts = calculateSettlementAmounts(gross, 10)
   return amounts
 }

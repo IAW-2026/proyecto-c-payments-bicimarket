@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { validateServiceTokenSeller } from '@/lib/service-token'
+import { extractIdempotencyKey, findByIdempotencyKey, checkIdempotency, cacheIdempotencyResponse } from '@/lib/idempotency'
 import { notifyBuyerOrderStatus } from '@/services/inter-app-client.service'
 import mpService from '@/services/mercado-pago.service'
 import { handleRouteError, badRequest, notFound, unauthorized } from '@/lib/errors'
@@ -13,6 +14,12 @@ export async function POST(
     const svcToken = req.headers.get('X-Service-Token') || req.headers.get('x-service-token')
     if (!validateServiceTokenSeller(svcToken)) {
       return unauthorized('Valid seller service token required')
+    }
+
+    const idempotencyKey = extractIdempotencyKey(req)
+    if (idempotencyKey) {
+      const cached = await checkIdempotency(idempotencyKey)
+      if (cached.cached) return cached.response
     }
 
     const { paymentId } = await params
@@ -86,11 +93,11 @@ export async function POST(
             })
           })
 
-          try {
-            await notifyBuyerOrderStatus(payment.order_id, 'refunded', payment.id)
-          } catch (notifyErr) {
-            console.error('Failed to notify buyer of refund:', notifyErr)
-          }
+          // try {
+          //   await notifyBuyerOrderStatus(payment.order_id, 'refunded', payment.id)
+          // } catch (notifyErr) {
+          //   console.error('Failed to notify buyer of refund:', notifyErr)
+          // }
         }
       } catch (mpErr) {
         console.error('MP refund failed:', mpErr)
@@ -106,7 +113,12 @@ export async function POST(
       include: { payment: { select: { order_id: true, status: true } } },
     })
 
-    return NextResponse.json({ data: finalRefund }, { status: 201 })
+    const response = { data: finalRefund }
+    if (idempotencyKey) {
+      await cacheIdempotencyResponse(idempotencyKey, response, 201)
+    }
+
+    return NextResponse.json(response, { status: 201 })
   } catch (err) {
     return handleRouteError(err, 'processing refund')
   }

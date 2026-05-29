@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { useMemo, useState } from "react"
 
 import { AdminShell } from "@/components/admin/admin-shell"
@@ -7,6 +8,7 @@ import { FilterDropdown } from "@/components/admin/filter-dropdown"
 import { Paginator } from "@/components/admin/paginator"
 import { Icons } from "@/lib/icons"
 import { ARS, formatDate } from "@/lib/currency"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { useCreateRefund, useRefunds } from "@/hooks/use-refunds"
 import { useToast } from "@/hooks/use-toast"
 import type { RefundFilters } from "@/hooks/use-refunds"
@@ -24,6 +26,7 @@ function copy(text: string) { navigator.clipboard.writeText(text) }
 export default function RefundsPage() {
   const { toast } = useToast()
   const [page, setPage] = useState(1)
+  const [selected, setSelected] = useState<Set<string>>(new Set())
   const [showDialog, setShowDialog] = useState(false)
   const [createPaymentId, setCreatePaymentId] = useState("")
   const [createAmount, setCreateAmount] = useState("")
@@ -45,6 +48,17 @@ export default function RefundsPage() {
   const refunds = (refundsQuery.data?.data ?? []) as Refund[]
   const pagination = refundsQuery.data?.pagination ?? { page: 1, limit: 20, total: 0, has_more: false }
 
+  const toggleSelect = (id: string) => {
+    const next = new Set(selected)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    setSelected(next)
+  }
+
+  const selectAll = () => {
+    if (selected.size === refunds.length) setSelected(new Set())
+    else setSelected(new Set(refunds.map((r) => r.id)))
+  }
+
   const handleCreate = async () => {
     if (!createPaymentId || !createAmount) return
     await createRefund.mutateAsync({
@@ -63,9 +77,10 @@ export default function RefundsPage() {
     toast({ description: "ID copiado al portapapeles" })
   }
 
-  const exportCsv = () => {
+  const exportCsv = (onlySelected = false) => {
+    const items = onlySelected ? refunds.filter((r) => selected.has(r.id)) : refunds
     const header = ["id", "payment_id", "amount_cents", "reason", "status", "created_at"].join(",")
-    const rows = refunds.map((r) =>
+    const rows = items.map((r) =>
       [r.id, r.payment_id, r.amount_cents, r.reason, r.status, r.created_at]
         .map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","),
     )
@@ -77,14 +92,16 @@ export default function RefundsPage() {
 
   return (
     <>
-      <AdminShell active="refunds" crumbs={["Admin", "Refunds"]}>
-        <div className="page-header">
+      <AdminShell active="refunds" crumbs={["Admin", "Reembolsos"]}>
+        <div className="page-layout">
+          <div className="page-header">
           <div>
-            <h1 className="page-title">Refunds</h1>
+            <h1 className="page-title">Reembolsos</h1>
             <p className="page-sub">Reembolsos totales o parciales contra Mercado Pago.</p>
           </div>
           <div className="btn-group">
-            <button className="btn btn-secondary" onClick={exportCsv}><Icons.Download /> Exportar</button>
+            <button className="btn btn-secondary" onClick={() => refundsQuery.refetch()} disabled={refundsQuery.isFetching}>{refundsQuery.isFetching ? <><Icons.Retry /> Refrescando…</> : <><Icons.Retry /> Refrescar</>}</button>
+            <button className="btn btn-secondary" onClick={() => exportCsv()}><Icons.Download /> Exportar</button>
             <button className="btn btn-primary" onClick={() => setShowDialog(true)}><Icons.Plus /> Crear refund</button>
           </div>
         </div>
@@ -95,9 +112,9 @@ export default function RefundsPage() {
             value={statusFilter}
             options={[
               { label: "todos", value: "" },
-              { label: "pending", value: "pending" },
-              { label: "approved", value: "approved" },
-              { label: "failed", value: "failed" },
+              { label: "pendiente", value: "pending" },
+              { label: "aprobado", value: "approved" },
+              { label: "fallido", value: "failed" },
             ]}
             onChange={(v) => { setStatusFilter(v); setPage(1) }}
           />
@@ -122,13 +139,17 @@ export default function RefundsPage() {
         </div>
 
         <div className="card">
-          <div className="table-wrapper">
-            <table className="t">
+<ScrollArea>
+          <table className="t">
               <thead>
                 <tr>
-                  <th className="checkbox-cell"><span className="cb" /></th>
-                  <th>Refund ID</th>
-                  <th>Payment</th>
+                  <th className="checkbox-cell">
+                    <span className={`cb ${selected.size > 0 ? (selected.size === refunds.length ? "checked" : "indeterminate") : ""}`} onClick={selectAll}>
+                      {selected.size === refunds.length ? <Icons.Check /> : selected.size > 0 ? <Icons.Minus /> : null}
+                    </span>
+                  </th>
+                  <th>ID</th>
+                  <th>Pago</th>
                   <th className="num">Monto</th>
                   <th>Tipo</th>
                   <th>Motivo</th>
@@ -138,16 +159,16 @@ export default function RefundsPage() {
                 </tr>
               </thead>
               <tbody>
-                {refundsQuery.isLoading ? (
+                {refundsQuery.isFetching ? (
                   <tr><td colSpan={9}>{[0, 1, 2].map((i) => <div key={i} className="sk" style={{ width: "100%", height: 20, margin: 8 }} />)}</td></tr>
                 ) : refunds.length === 0 ? (
                   <tr>
                     <td colSpan={9} className="empty">
                       <div className="icon-wrap"><Icons.Undo /></div>
-                      <div className="t">No hay refunds</div>
+                      <div className="t">No hay reembolsos</div>
                       <div className="s">Creá uno nuevo desde un pago aprobado.</div>
                       <div className="a">
-                        <button className="btn btn-primary" onClick={() => setShowDialog(true)}><Icons.Plus /> Crear refund</button>
+            <button className="btn btn-primary" onClick={() => setShowDialog(true)}><Icons.Plus /> Crear reembolso</button>
                       </div>
                     </td>
                   </tr>
@@ -155,14 +176,18 @@ export default function RefundsPage() {
                   refunds.map((r) => {
                     const payment = (r as Refund & { payment?: { order_id?: string } }).payment
                     return (
-                      <tr key={r.id}>
-                        <td className="checkbox-cell"><span className="cb" /></td>
-                        <td className="id"><span className="row-link">{r.id}</span></td>
+                      <tr key={r.id} className={selected.has(r.id) ? "row-selected" : ""}>
+                        <td className="checkbox-cell">
+                          <span className={`cb ${selected.has(r.id) ? "checked" : ""}`} onClick={() => toggleSelect(r.id)}>
+                            {selected.has(r.id) ? <Icons.Check /> : null}
+                          </span>
+                        </td>
+                        <td className="id"><Link href={`/admin/refunds/${r.id}`} className="row-link">{r.id}</Link></td>
                         <td className="id">{r.payment_id.slice(0, 14)}…</td>
                         <td className="num tnum" style={{ fontWeight: 500 }}>{ARS(r.amount_cents)}</td>
-                        <td><span className="tag" style={{ textTransform: "capitalize" }}>{r.amount_cents >= 100000 ? "full" : "partial"}</span></td>
+                        <td><span className="tag" style={{ textTransform: "capitalize" }}>{r.amount_cents >= 100000 ? "total" : "parcial"}</span></td>
                         <td><span className="badge badge-soft-primary">{reasonLabels[r.reason]}</span></td>
-                        <td><span className={`badge ${r.status}`}><span className="dot" />{r.status}</span></td>
+                        <td><span className={`badge ${r.status}`}><span className="dot" />{{ pending: "pendiente", approved: "aprobado", failed: "fallido" }[r.status] ?? r.status}</span></td>
                         <td className="muted mono" style={{ fontSize: 12 }}>{formatDate(r.created_at)}</td>
                         <td className="actions-cell"><span className="icon-btn" onClick={() => handleCopy(r.id)} title="Copiar ID"><Icons.Copy /></span></td>
                       </tr>
@@ -171,7 +196,7 @@ export default function RefundsPage() {
                 )}
               </tbody>
             </table>
-          </div>
+          </ScrollArea>
           <Paginator
             page={page}
             total={pagination.total}
@@ -181,6 +206,16 @@ export default function RefundsPage() {
             onNext={() => setPage((c) => c + 1)}
           />
         </div>
+      {selected.size > 0 && (
+        <div className="row gap-3 muted" style={{ marginTop: 14, fontSize: 12.5, flexWrap: "wrap" }}>
+          <span>{selected.size} seleccionados</span>
+          <span>·</span>
+          <span>Total seleccionado: <span className="tnum" style={{ color: "var(--foreground)", fontWeight: 600 }}>{ARS(refunds.filter((r) => selected.has(r.id)).reduce((a, b) => a + b.amount_cents, 0))}</span></span>
+          <span>·</span>
+          <button className="btn btn-secondary btn-sm" onClick={() => exportCsv(true)}>Exportar selección</button>
+        </div>
+      )}
+        </div>
       </AdminShell>
 
       {showDialog && (
@@ -189,15 +224,15 @@ export default function RefundsPage() {
             <div className="dialog-head">
               <div className="row" style={{ justifyContent: "space-between" }}>
                 <div>
-                  <div className="dialog-title">Crear refund</div>
-                  <div className="dialog-sub">El refund se procesa contra Mercado Pago.</div>
+                  <div className="dialog-title">Crear reembolso</div>
+                  <div className="dialog-sub">El reembolso se procesa contra Mercado Pago.</div>
                 </div>
                 <span className="icon-btn" onClick={() => setShowDialog(false)} aria-label="Cerrar"><Icons.X /></span>
               </div>
             </div>
             <div className="dialog-body">
               <div className="field">
-                <span className="l" id="refund-payment-label">Payment ID <span className="required">*</span></span>
+                <span className="l" id="refund-payment-label">ID de Pago <span className="required">*</span></span>
                 <input
                   type="text"
                   value={createPaymentId}
@@ -229,9 +264,9 @@ export default function RefundsPage() {
                   aria-labelledby="refund-reason-label"
                   style={{ width: "100%" }}
                 >
-                  <option value="seller_rejected">Seller rejected</option>
-                  <option value="buyer_cancelled">Buyer cancelled</option>
-                  <option value="not_delivered">Not delivered</option>
+                  <option value="seller_rejected">Vendedor rechazó</option>
+                  <option value="buyer_cancelled">Comprador canceló</option>
+                  <option value="not_delivered">No entregado</option>
                   <option value="manual">Manual (admin)</option>
                 </select>
               </div>
@@ -239,14 +274,14 @@ export default function RefundsPage() {
                 <Icons.AlertTri className="ic" />
                 <div className="col">
                   <span className="a-title">Esta acción es irreversible</span>
-                  <span className="a-body">Al confirmar, Mercado Pago iniciará el refund. Los settlements asociados pasarán a cancelled automáticamente.</span>
+                  <span className="a-body">Al confirmar, Mercado Pago iniciará el reembolso. Las liquidaciones asociadas pasarán a canceled automáticamente.</span>
                 </div>
               </div>
             </div>
             <div className="dialog-foot">
               <button className="btn btn-ghost" onClick={() => setShowDialog(false)}>Cancelar</button>
               <button className="btn btn-primary" onClick={handleCreate} disabled={createRefund.isPending}>
-                <Icons.Undo /> Confirmar refund
+                <Icons.Undo /> Confirmar reembolso
               </button>
             </div>
           </div>

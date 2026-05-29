@@ -13,11 +13,11 @@ let _firstVisit = true
 
 const navItems = [
   { key: "dashboard", label: "Dashboard", href: "/admin", icon: Icons.Home },
-  { key: "payments", label: "Payments", href: "/admin/payments", icon: Icons.CreditCard },
-  { key: "settlements", label: "Settlements", href: "/admin/settlements", icon: Icons.Coins },
-  { key: "refunds", label: "Refunds", href: "/admin/refunds", icon: Icons.Undo },
-  { key: "payouts", label: "Payouts", href: "/admin/payouts", icon: Icons.Send },
-  { key: "receipts", label: "Receipts", href: "/admin/receipts", icon: Icons.Receipt },
+  { key: "payments", label: "Pagos", href: "/admin/payments", icon: Icons.CreditCard },
+  { key: "settlements", label: "Liquidaciones", href: "/admin/settlements", icon: Icons.Coins },
+  { key: "refunds", label: "Reembolsos", href: "/admin/refunds", icon: Icons.Undo },
+  { key: "payouts", label: "Pagos a vendedores", href: "/admin/payouts", icon: Icons.Send },
+  { key: "receipts", label: "Comprobantes", href: "/admin/receipts", icon: Icons.Receipt },
 ]
 
 function Sidebar({ active, open, onClose }: { active: string; open: boolean; onClose: () => void }) {
@@ -29,7 +29,7 @@ function Sidebar({ active, open, onClose }: { active: string; open: boolean; onC
           <div className="brand-glyph"><Glyph /></div>
           <div>
             <div className="brand-name">BiciMarket</div>
-            <div className="brand-sub mono">payments · v1.4</div>
+            <div className="brand-sub">Payments</div>
           </div>
         </div>
         <div className="nav">

@@ -6,6 +6,13 @@ import { extractIdempotencyKey, checkIdempotency, cacheIdempotencyResponse } fro
 
 export async function GET(req: Request) {
   try {
+    const svcToken = req.headers.get('X-Service-Token') || req.headers.get('x-service-token')
+    if (!validateServiceTokenBuyer(svcToken)) {
+      const { requireAdmin } = await import('@/lib/admin-auth')
+      const adminErr = await requireAdmin()
+      if (adminErr) return adminErr
+    }
+
     const url = new URL(req.url)
     const paymentId = url.searchParams.get('paymentId')
     const from = url.searchParams.get('from')

@@ -51,6 +51,32 @@ export function useMarkSettlementsPaid() {
   })
 }
 
+export function useMarkPayoutPaid() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (payoutId: string) => {
+      const { data } = await axios.patch(`/api/v1/payouts/${payoutId}`)
+      return data.data
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['payout'] })
+      queryClient.invalidateQueries({ queryKey: ['payouts'] })
+    }
+  })
+}
+
+export function usePayout(payoutId: string) {
+  return useQuery({
+    queryKey: ['payout', payoutId],
+    queryFn: async () => {
+      const { data } = await axios.get<{ data: import('@/types/payments').Payout & { settlement?: import('@/types/payments').Settlement & { payment?: import('@/types/payments').Payment } } }>(`/api/v1/payouts/${payoutId}`)
+      return data.data
+    },
+    enabled: !!payoutId,
+  })
+}
+
 export function usePayouts(filters: PayoutFilters = {}) {
   return useQuery({
     queryKey: ['payouts', filters],

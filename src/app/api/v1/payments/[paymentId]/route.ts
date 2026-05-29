@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { validateServiceTokenBuyer } from '@/lib/service-token'
+import { requireAdmin } from '@/lib/admin-auth'
 
 // GET /api/v1/payments/{paymentId} - get payment detail
 export async function GET(
@@ -7,6 +9,12 @@ export async function GET(
   { params }: { params: Promise<{ paymentId: string }> }
 ) {
   try {
+    const svcToken = req.headers.get('X-Service-Token') || req.headers.get('x-service-token')
+    if (!validateServiceTokenBuyer(svcToken)) {
+      const adminErr = await requireAdmin()
+      if (adminErr) return adminErr
+    }
+
     const { paymentId } = await params
 
     const payment = await prisma.payment.findUnique({

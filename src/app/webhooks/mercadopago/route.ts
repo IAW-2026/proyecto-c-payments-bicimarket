@@ -21,7 +21,8 @@ export async function POST(req: Request) {
     const validation = validatePaymentWebhookSignature(signatureHeader, xRequestId, dataId)
     const signatureValid = validation.valid && (validation.ts ? isTimestampFresh(validation.ts) : false)
 
-    const mpEventId = xRequestId || `${payload?.topic || 'mp'}:${dataId || 'unknown'}:${Date.now()}`
+    const action = payload?.action || payload?.topic || 'unknown'
+    const mpEventId = xRequestId || `${action}:${dataId || 'unknown'}`
 
     try {
       await prisma.mpWebhookEvent.create({

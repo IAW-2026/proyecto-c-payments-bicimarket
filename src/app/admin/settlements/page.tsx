@@ -9,6 +9,7 @@ import { FilterDropdown } from "@/components/admin/filter-dropdown"
 import { Paginator } from "@/components/admin/paginator"
 import { Icons } from "@/lib/icons"
 import { ARS, formatDate } from "@/lib/currency"
+import { ScrollArea } from "@/components/ui/scroll-area"
 import { useMarkSettlementsPaid, useSettlements } from "@/hooks/use-settlements"
 import { useToast } from "@/hooks/use-toast"
 import type { SettlementFilters } from "@/types/filters"
@@ -72,9 +73,10 @@ export default function SettlementsPage() {
     toast({ description: "ID copiado al portapapeles" })
   }
 
-  const exportCsv = () => {
+  const exportCsv = (onlySelected = false) => {
+    const items = onlySelected ? settlements.filter((s) => selected.has(s.id)) : settlements
     const header = ["id", "payment_id", "seller_profile_id", "gross_amount_cents", "fee_amount_cents", "net_amount_cents", "status", "created_at"].join(",")
-    const rows = settlements.map((s) =>
+    const rows = items.map((s) =>
       [s.id, s.payment_id, s.seller_profile_id, s.gross_amount_cents, s.fee_amount_cents, s.net_amount_cents, s.status, s.created_at]
         .map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","),
     )
@@ -85,23 +87,25 @@ export default function SettlementsPage() {
   }
 
   return (
-    <AdminShell active="settlements" crumbs={["Admin", "Settlements"]}>
-      <div className="page-header">
+    <AdminShell active="settlements" crumbs={["Admin", "Liquidaciones"]}>
+      <div className="page-layout">
+        <div className="page-header">
         <div>
-          <h1 className="page-title">Settlements</h1>
+          <h1 className="page-title">Liquidaciones</h1>
           <p className="page-sub">Liquidaciones por vendedor. Se generan al confirmar entrega.</p>
         </div>
         <div className="btn-group">
-          <button className="btn btn-secondary" onClick={exportCsv}><Icons.Download /> Exportar</button>
-          <button className="btn btn-primary" onClick={() => router.push("/admin/payouts")}><Icons.Send /> Ir a Payouts</button>
+          <button className="btn btn-secondary" onClick={() => q.refetch()} disabled={q.isFetching}>{q.isFetching ? <><Icons.Retry /> Refrescando…</> : <><Icons.Retry /> Refrescar</>}</button>
+          <button className="btn btn-secondary" onClick={() => exportCsv()}><Icons.Download /> Exportar</button>
+          <button className="btn btn-primary" onClick={() => router.push("/admin/payouts")}><Icons.Send /> Ir a pagos a vendedores</button>
         </div>
       </div>
 
       <div className="grid-4 gap-4" style={{ marginBottom: 16 }}>
-        <div className="card kpi"><div className="label">Pendientes</div><div className="v tnum">{statusCounts["pending"] || 0}</div><div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Requieren payout</div></div>
+        <div className="card kpi"><div className="label">Pendientes</div><div className="v tnum">{statusCounts["pending"] || 0}</div><div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Requieren pago</div></div>
         <div className="card kpi"><div className="label">Pagados</div><div className="v tnum">{statusCounts["paid"] || 0}</div><div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Completados</div></div>
         <div className="card kpi"><div className="label">Fallidas</div><div className="v tnum" style={{ color: "oklch(0.55 0.18 25)" }}>{statusCounts["failed"] || 0}</div><div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Requieren reintento</div></div>
-        <div className="card kpi"><div className="label">Manual review</div><div className="v tnum" style={{ color: "oklch(0.50 0.18 305)" }}>{statusCounts["manual_review"] || 0}</div><div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Requiere acción</div></div>
+        <div className="card kpi"><div className="label">Revisión manual</div><div className="v tnum" style={{ color: "oklch(0.50 0.18 305)" }}>{statusCounts["manual_review"] || 0}</div><div className="muted" style={{ fontSize: 12, marginTop: 6 }}>Requiere acción</div></div>
       </div>
 
       <div className="filterbar">
@@ -111,10 +115,10 @@ export default function SettlementsPage() {
           value={statusFilter}
           options={[
             { label: "todos", value: "" },
-            { label: "pending", value: "pending" },
-            { label: "paid", value: "paid" },
-            { label: "failed", value: "failed" },
-            { label: "manual review", value: "manual_review" },
+            { label: "pendiente", value: "pending" },
+            { label: "pagado", value: "paid" },
+            { label: "fallido", value: "failed" },
+            { label: "revisión manual", value: "manual_review" },
           ]}
           onChange={(v) => { setStatusFilter(v); setPage(1) }}
         />
@@ -129,7 +133,7 @@ export default function SettlementsPage() {
       </div>
 
       <div className="card">
-        <div className="table-wrapper">
+        <ScrollArea>
           <table className="t">
             <thead>
               <tr>
@@ -138,26 +142,26 @@ export default function SettlementsPage() {
                     {selected.size === settlements.length ? <Icons.Check /> : selected.size > 0 ? <Icons.Minus /> : null}
                   </span>
                 </th>
-                <th>Settlement</th>
-                <th>Seller</th>
-                <th>Payment</th>
-                <th className="num"><span className="sort-h">Gross <Icons.Down /></span></th>
-                <th className="num">Fee</th>
-                <th className="num"><span className="sort-h">Net <Icons.Down /></span></th>
+                <th>Liquidación</th>
+                <th>Vendedor</th>
+                <th>Pago</th>
+                <th className="num"><span className="sort-h">Bruto <Icons.Down /></span></th>
+                <th className="num">Comisión</th>
+                <th className="num"><span className="sort-h">Neto <Icons.Down /></span></th>
                 <th>Estado</th>
                 <th>Fecha</th>
                 <th className="actions-cell"></th>
               </tr>
             </thead>
             <tbody>
-              {q.isLoading ? (
+              {q.isFetching ? (
                 <tr><td colSpan={10}>{[0, 1, 2, 3].map((i) => <div key={i} className="sk" style={{ width: "100%", height: 20, margin: 8 }} />)}</td></tr>
               ) : settlements.length === 0 ? (
                 <tr>
                   <td colSpan={10} className="empty">
                     <div className="icon-wrap"><Icons.Coins /></div>
-                    <div className="t">No hay settlements</div>
-                    <div className="s">Los settlements aparecen cuando se entregan órdenes.</div>
+                    <div className="t">No hay liquidaciones</div>
+                    <div className="s">Las liquidaciones aparecen cuando se entregan órdenes.</div>
                   </td>
                 </tr>
               ) : (
@@ -174,7 +178,7 @@ export default function SettlementsPage() {
                     <td className="num tnum">{ARS(s.gross_amount_cents, { bare: true })}</td>
                     <td className="num tnum muted">−{ARS(s.fee_amount_cents, { bare: true })}</td>
                     <td className="num tnum" style={{ fontWeight: 500 }}>{ARS(s.net_amount_cents, { bare: true })}</td>
-                    <td><span className={`badge ${s.status}`}><span className="dot" />{s.status}</span></td>
+                    <td><span className={`badge ${s.status}`}><span className="dot" />{{ pending: "pendiente", paid: "pagado", failed: "fallido", manual_review: "revisión manual", cancelled: "cancelado" }[s.status] ?? s.status}</span></td>
                     <td className="muted mono" style={{ fontSize: 12 }}>{formatDate(s.created_at)}</td>
                     <td className="actions-cell">
                       <span className="icon-btn" onClick={() => handleCopy(s.id)} title="Copiar ID"><Icons.Copy /></span>
@@ -184,18 +188,22 @@ export default function SettlementsPage() {
               )}
             </tbody>
           </table>
-        </div>
+        </ScrollArea>
         <div className="foot-summary">
-          <div className="col"><span className="lbl">Total gross</span><span className="val tnum">{ARS(totals.gross)}</span></div>
-          <div className="col"><span className="lbl">Total fees</span><span className="val tnum">{ARS(totals.fee)}</span></div>
-          <div className="col"><span className="lbl">Total net</span><span className="val tnum">{ARS(totals.net)}</span></div>
+          <div className="col"><span className="lbl">Total bruto</span><span className="val tnum">{ARS(totals.gross)}</span></div>
+          <div className="col"><span className="lbl">Total comisiones</span><span className="val tnum">{ARS(totals.fee)}</span></div>
+          <div className="col"><span className="lbl">Total neto</span><span className="val tnum">{ARS(totals.net)}</span></div>
           <div style={{ flex: 1 }} />
           <div className="row gap-2" style={{ alignSelf: "center" }}>
+            <button className="btn btn-secondary btn-sm" onClick={() => exportCsv(true)} disabled={selected.size === 0}>
+              Exportar selección ({selected.size})
+            </button>
             <button className="btn btn-secondary btn-sm" onClick={handleMarkPaid} disabled={selected.size === 0 || markPaid.isPending}>
               Marcar como pagado ({selected.size})
             </button>
           </div>
         </div>
+      </div>
       </div>
     </AdminShell>
   )

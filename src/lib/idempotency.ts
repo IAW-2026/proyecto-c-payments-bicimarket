@@ -4,7 +4,7 @@ import { NextResponse } from 'next/server'
 export function extractIdempotencyKey(req: Request): string | undefined {
   try {
     const key = req.headers.get('Idempotency-Key') || req.headers.get('idempotency-key')
-    return key || undefined
+    return key?.toLowerCase() || undefined
   } catch {
     return undefined
   }

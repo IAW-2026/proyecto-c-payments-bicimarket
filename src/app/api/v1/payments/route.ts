@@ -11,6 +11,12 @@ import mpService from '@/services/mercado-pago.service'
 
 export async function GET(req: Request) {
   try {
+    const svcToken = req.headers.get('X-Service-Token') || req.headers.get('x-service-token')
+    if (!validateServiceTokenBuyer(svcToken)) {
+      const adminErr = await requireAdmin()
+      if (adminErr) return adminErr
+    }
+
     const url = new URL(req.url)
     const orderId = url.searchParams.get('orderId')
     const buyerId = url.searchParams.get('buyerId')

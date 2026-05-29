@@ -1,4 +1,4 @@
-import { auth } from '@clerk/nextjs/server'
+import { auth, currentUser } from '@clerk/nextjs/server'
 import { unauthorized, forbidden } from './errors'
 
 export async function requireAdmin() {
@@ -10,12 +10,17 @@ export async function requireAdmin() {
   }
 
   const claims = session?.sessionClaims as Record<string, unknown> | undefined
-  const publicMetadata = claims?.publicMetadata as Record<string, unknown> | undefined
-  const isAdmin = publicMetadata?.admin === true
+  const claimMetadata = claims?.publicMetadata as Record<string, unknown> | undefined
 
-  if (!isAdmin) {
-    return forbidden('Admin access required')
+  if (claimMetadata?.admin === true) return null
+
+  try {
+    const user = await currentUser()
+    const userMetadata = user?.publicMetadata as Record<string, unknown> | undefined
+    if (userMetadata?.admin === true) return null
+  } catch (err) {
+    console.error('[requireAdmin] currentUser() failed:', err)
   }
 
-  return null
+  return forbidden('Admin access required')
 }

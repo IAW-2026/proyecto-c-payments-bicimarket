@@ -146,11 +146,11 @@ export async function POST(req: Request) {
             })
           }
 
-          try {
-            await notifyBuyerOrderStatus(payment.order_id, 'refunded', payment.id)
-          } catch (notifyErr) {
-            console.error('Failed to notify buyer of refund:', notifyErr)
-          }
+          // try {
+          //   await notifyBuyerOrderStatus(payment.order_id, 'refunded', payment.id)
+          // } catch (notifyErr) {
+          //   console.error('Failed to notify buyer of refund:', notifyErr)
+          // }
         }
       } catch (mpErr) {
         console.error('MP refund failed:', mpErr)

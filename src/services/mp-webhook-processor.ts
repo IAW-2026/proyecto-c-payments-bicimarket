@@ -1,5 +1,6 @@
 import { prisma } from '@/lib/prisma'
 import mpService from './mercado-pago.service'
+import { notifyBuyerOrderStatus, createSellerSalesOrder } from './inter-app-client.service'
 
 function mapMpStatusToPaymentStatus(status?: string) {
   const s = (status || '').toString().toLowerCase()
@@ -160,6 +161,21 @@ export async function processMpWebhookEvent(mpEventId: string) {
             console.error('[MP Processor] Failed creating receipt', rcErr)
           }
         }
+
+        // // ── Inter-app notifications (commented out for presentation) ──
+        // const previousStatus = payment.status as string
+        // const newStatus = updateData.status as string
+        // if (previousStatus !== 'approved' && newStatus === 'approved') {
+        //   try { await notifyBuyerOrderStatus(payment.order_id, 'paid', payment.id) } catch {}
+        //   try {
+        //     const itemsSummary = payment.items_summary as Array<Record<string, unknown>> | null
+        //     if (itemsSummary && Array.isArray(itemsSummary)) {
+        //       for (const seller of itemsSummary) {
+        //         await createSellerSalesOrder(seller.seller_profile_id as string, { order_id: payment.order_id })
+        //       }
+        //     }
+        //   } catch {}
+        // }
       } catch (pErr) {
         console.error('[MP Processor] Failed updating payment', pErr)
       }
