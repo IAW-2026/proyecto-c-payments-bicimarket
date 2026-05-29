@@ -66,18 +66,20 @@ export async function POST(req: Request) {
     }
 
     const idempotencyKey = extractIdempotencyKey(req)
-    if (idempotencyKey) {
-      const existing = await findByIdempotencyKey(idempotencyKey)
-      if (existing) {
-        console.info(`[Payments:${requestId}] Idempotency hit (payment): ${idempotencyKey}`)
-        return NextResponse.json({ data: existing }, { status: 200 })
-      }
+    if (!idempotencyKey) {
+      return badRequest('Idempotency-Key header is required')
+    }
 
-      const idempotent = await checkIdempotency(idempotencyKey)
-      if (idempotent.cached) {
-        console.info(`[Payments:${requestId}] Idempotency hit (cache): ${idempotencyKey}`)
-        return idempotent.response
-      }
+    const existing = await findByIdempotencyKey(idempotencyKey)
+    if (existing) {
+      console.info(`[Payments:${requestId}] Idempotency hit (payment): ${idempotencyKey}`)
+      return NextResponse.json({ data: existing }, { status: 200 })
+    }
+
+    const idempotent = await checkIdempotency(idempotencyKey)
+    if (idempotent.cached) {
+      console.info(`[Payments:${requestId}] Idempotency hit (cache): ${idempotencyKey}`)
+      return idempotent.response
     }
 
     const body = await req.json()

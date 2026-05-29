@@ -5,11 +5,14 @@ export async function POST(req: Request) {
 
   const origin = new URL(req.url).origin
 
+  const idempotencyKey = req.headers.get('Idempotency-Key') || req.headers.get('idempotency-key')
+
   const response = await fetch(`${origin}/api/v1/payments`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'X-Service-Token': process.env.BUYER_TO_PAYMENTS_SERVICE_TOKEN || '',
+      ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
     },
     body: JSON.stringify(body),
   })

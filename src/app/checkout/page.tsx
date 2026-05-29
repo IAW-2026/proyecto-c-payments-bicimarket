@@ -23,8 +23,9 @@ export default function CheckoutPage() {
     mutationFn: async () => {
       const amountCents = Math.round(parseFloat(amount) * 100)
       const origin = window.location.origin
+      const orderId = `order_${Date.now()}`
       const { data } = await axios.post('/api/test/checkout', {
-        order_id: `order_${Date.now()}`,
+        order_id: orderId,
         buyer_profile_id: "buyer_demo",
         buyer_clerk_user_id: "user_demo",
         buyer_email: email,
@@ -42,6 +43,8 @@ export default function CheckoutPage() {
             shipping_cost_cents: 0,
           },
         ],
+      }, {
+        headers: { 'Idempotency-Key': orderId },
       })
       return data
     },
