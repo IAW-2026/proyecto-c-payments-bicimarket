@@ -124,7 +124,7 @@ export async function processMpWebhookEvent(mpEventId: string) {
     // Update payment record if found
     if (payment) {
       try {
-        const updateData: any = { gateway_reference: mpDetails.id, method: mapPaymentMethod(mpDetails.payment_method_id) }
+        const updateData: any = { gateway_reference: String(mpDetails.id), method: mapPaymentMethod(mpDetails.payment_method?.type || mpDetails.payment_method_id) }
 
         const lastCard4 = mpDetails.card?.last_four_digits || mpDetails.card?.last_four || mpDetails.last_four_digits || mpDetails.last_four
         if (lastCard4) updateData.card_last4 = String(lastCard4)
