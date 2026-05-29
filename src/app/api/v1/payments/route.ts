@@ -5,9 +5,9 @@ import { prisma } from '@/lib/prisma'
 import { extractIdempotencyKey, findByIdempotencyKey, checkIdempotency, cacheIdempotencyResponse } from '@/lib/idempotency'
 import { validateServiceTokenBuyer } from '@/lib/service-token'
 import { requireAdmin } from '@/lib/admin-auth'
-import { createCheckoutPreference, MercadoPagoError, MercadoPagoCredentialError } from '@/services/mercado-pago.service'
 import { handleRouteError, badRequest } from '@/lib/errors'
 import { createPaymentSchema } from '@/schemas/payment'
+import mpService from '@/services/mercado-pago.service'
 
 export async function GET(req: Request) {
   try {
@@ -122,81 +122,79 @@ export async function POST(req: Request) {
 
     console.info(`[Payments:${requestId}] Payment created: ${payment.id}`)
 
-    let checkoutUrl: string | null = null
-    let gatewayReference: string | null = null
-    let preferenceWarning: string | null = null
+    // Build Mercado Pago preference
+    const items: any[] = []
+    if (validated.items_summary && validated.items_summary.length > 0) {
+      for (const seller of validated.items_summary) {
+        if (Array.isArray((seller as any).items) && (seller as any).items.length > 0) {
+          for (const it of (seller as any).items) {
+            items.push({
+              title: it.product_name_snapshot,
+              quantity: it.quantity,
+              unit_price: (it.unit_price_cents || 0) / 100,
+              currency_id: validated.currency,
+            })
+          }
+        }
+      }
+    }
+
+    if (items.length === 0) {
+      // Fallback to a single item representing the order
+      items.push({ title: `Order ${validated.order_id}`, quantity: 1, unit_price: validated.amount_cents / 100, currency_id: validated.currency })
+    }
+
+    const preference: Record<string, unknown> = {
+      items,
+      payer: validated.buyer_email ? { email: validated.buyer_email } : undefined,
+      external_reference: payment.id,
+      auto_return: 'approved',
+      back_urls: validated.return_urls ?? undefined,
+    }
 
     try {
-      const pref = await createCheckoutPreference({
-        amount_cents: payment.amount_cents,
-        external_reference: payment.id,
-        buyer_email: validated.buyer_email,
-        items: validated.items_summary?.map((item) => ({
-          id: item.seller_profile_id,
-          title: `Seller ${item.seller_profile_id}`,
-          quantity: 1,
-          unit_price_cents: item.subtotal_cents + item.shipping_cost_cents,
-        })) || [],
-        return_urls: validated.return_urls,
+      const mpResp = await mpService.createPreference(preference)
+      const body = (mpResp && (mpResp.body || mpResp)) as any
+
+      // Record the outbound attempt with raw request/response for auditing
+      await prisma.paymentAttempt.create({
+        data: {
+          payment_id: payment.id,
+          attempt_number: 1,
+          provider: 'mercadopago',
+          status: 'pending',
+          request_payload: preference as any,
+          response_payload: body as any,
+        },
       })
 
-      checkoutUrl = pref.init_point
-      gatewayReference = pref.id
-
-      await prisma.payment.update({
-        where: { id: payment.id },
-        data: { gateway_reference: gatewayReference },
-      })
-
-      console.info(`[Payments:${requestId}] MP preference created: ${gatewayReference} | checkout_url set: ${!!checkoutUrl} | sandbox=${pref.sandbox_mode}`)
-
-      // Validate the checkout URL is well-formed
-      if (!checkoutUrl || !checkoutUrl.startsWith('https://')) {
-        console.error(`[Payments:${requestId}] Checkout URL is invalid: ${checkoutUrl}`)
-        preferenceWarning = 'MP returned an invalid checkout URL'
-        checkoutUrl = null
+      const responseBody = {
+        data: { payment_id: payment.id, init_point: body.init_point || body.sandbox_init_point, preference_id: body.id },
+        public_key: mpService.getPublicKey?.(),
       }
+
+      if (idempotencyKey) {
+        await cacheIdempotencyResponse(idempotencyKey, responseBody, 200)
+      }
+
+      return NextResponse.json(responseBody)
     } catch (mpErr) {
-      if (mpErr instanceof MercadoPagoCredentialError) {
-        console.error(`[Payments:${requestId}] MP CREDENTIAL ERROR:`, {
-          message: mpErr.message,
-          mpCode: mpErr.mpCode,
-          statusCode: mpErr.statusCode,
-        })
-        preferenceWarning = `MP credential error: ${mpErr.message}`
-      } else if (mpErr instanceof MercadoPagoError) {
-        console.error(`[Payments:${requestId}] MP preference creation failed:`, {
-          statusCode: mpErr.statusCode,
-          mpCode: mpErr.mpCode,
-          message: mpErr.message,
-        })
-        preferenceWarning = `MP error: ${mpErr.message}`
-      } else {
-        console.error(`[Payments:${requestId}] Failed to create MP checkout preference:`, mpErr)
-        preferenceWarning = 'Failed to create MP checkout preference'
-      }
+      console.error(`[Payments:${requestId}] Mercado Pago preference creation failed:`, mpErr)
+      // record failed attempt
+      await prisma.paymentAttempt.create({
+        data: {
+          payment_id: payment.id,
+          attempt_number: 1,
+          provider: 'mercadopago',
+          status: 'rejected',
+          request_payload: preference as any,
+          response_payload: (mpErr && (mpErr)) as any,
+        },
+      })
+      return NextResponse.json({ error: 'failed to create payment preference' }, { status: 502 })
     }
 
-    if (!checkoutUrl) {
-      console.warn(`[Payments:${requestId}] Payment ${payment.id} created WITHOUT checkout_url: ${preferenceWarning || 'unknown reason'}`)
-    }
-
-    const responseBody = {
-      data: {
-        ...payment,
-        checkout_url: checkoutUrl,
-        gateway_reference: gatewayReference,
-        preference_warning: preferenceWarning,
-      },
-    }
-
-    if (idempotencyKey) {
-      await cacheIdempotencyResponse(idempotencyKey, responseBody, 201)
-    }
-
-    return NextResponse.json(responseBody, { status: 201 })
   } catch (err) {
-    console.error(`[Payments:${requestId}] Fatal error:`, err)
     return handleRouteError(err, 'creating payment')
   }
 }

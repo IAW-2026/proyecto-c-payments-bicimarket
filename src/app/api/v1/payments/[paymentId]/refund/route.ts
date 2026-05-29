@@ -1,8 +1,8 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { validateServiceTokenSeller } from '@/lib/service-token'
-import { processRefund as mpProcessRefund } from '@/services/mercado-pago.service'
 import { notifyBuyerOrderStatus } from '@/services/inter-app-client.service'
+import mpService from '@/services/mercado-pago.service'
 import { handleRouteError, badRequest, notFound, unauthorized } from '@/lib/errors'
 
 export async function POST(
@@ -50,7 +50,7 @@ export async function POST(
 
     if (payment.gateway_reference) {
       try {
-        const mpResult = await mpProcessRefund(payment.gateway_reference, amount_cents)
+        const mpResult = await mpService.createRefund(payment.gateway_reference, amount_cents)
 
         await prisma.refund.update({
           where: { id: refund.id },
