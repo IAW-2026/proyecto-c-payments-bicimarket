@@ -38,7 +38,7 @@ export default function RootLayout({
         lang="es"
         className={`${ibmPlexSans.variable} ${instrumentSans.variable} ${jetbrainsMono.variable} h-full antialiased`}
       >
-        <body className="min-h-full flex flex-col">
+        <body className="h-full flex flex-col overflow-hidden">
           <QueryProvider>
             <TooltipProvider>
               {children}

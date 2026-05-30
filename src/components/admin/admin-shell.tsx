@@ -128,7 +128,7 @@ export function AdminShell({
   }, [])
 
   return (
-    <div className={`app${!sidebarOpen ? " sidebar-collapsed" : ""}`} style={{ minHeight: "100dvh" }}>
+    <div className={`app${!sidebarOpen ? " sidebar-collapsed" : ""}`}>
       <Sidebar active={active} open={sidebarOpen} onClose={closeSidebar} />
       <div className="main">
         <Topbar crumbs={defaultCrumbs} onMenuClick={() => setSidebarOpen((c) => !c)} sidebarOpen={sidebarOpen} />

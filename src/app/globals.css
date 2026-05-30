@@ -176,7 +176,7 @@ body {
 .page-layout > .card .card-head,
 .page-layout > .card .foot-summary,
 .page-layout > .card .paginator { flex-shrink: 0; }
-.page-layout > .grid-2 { flex: 1; overflow: hidden; min-height: 0; flex-shrink: 1; }
+.page-layout > .grid-2 { flex: 1; overflow: hidden; min-height: 0; flex-shrink: 1; grid-auto-rows: minmax(0, 1fr); }
 .page-layout > .grid-2 .card { overflow: hidden; display: flex; flex-direction: column; }
 .page-layout > .grid-2 .card [data-slot="scroll-area"] { flex: 1; min-height: 0; }
 .page-body-scroll { flex: 1; overflow: auto; min-height: 0; flex-shrink: 1; }
@@ -254,18 +254,18 @@ h2.sec-title { font-size:15px; font-weight:600; letter-spacing:-0.01em; margin:0
 .card-foot { padding: 12px 16px; border-top:1px solid var(--border); display:flex; align-items:center; gap:8px; }
 
 /* KPI — compact */
-.kpi { padding: 10px 14px; }
-.kpi .label { display:flex; align-items:center; gap:6px; font-size: 11px; }
-.kpi .v { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; margin-top: 2px; font-feature-settings: "tnum"; }
-.kpi .delta { display:inline-flex; align-items:center; gap:3px; font-size: 11px; margin-top: 2px; padding: 1px 5px; border-radius: 5px; font-weight: 500; white-space:nowrap; }
+.kpi { padding: 8px 12px; }
+.kpi .label { display:flex; align-items:center; gap:4px; font-size: 10.5px; }
+.kpi .v { font-size: 17px; font-weight: 600; letter-spacing: -0.02em; margin-top: 1px; font-feature-settings: "tnum"; }
+.kpi .delta { display:inline-flex; align-items:center; gap:3px; font-size: 10.5px; margin-top: 1px; padding: 1px 4px; border-radius: 4px; font-weight: 500; white-space:nowrap; }
 .delta.up { background:var(--green-50); color:var(--green-900); }
 .delta.down { background:var(--red-50); color:var(--red-900); }
 .delta.flat { background:var(--muted); color:var(--muted-foreground); }
-.kpi .spark { margin-top: 4px; height: 22px; }
+.kpi .spark { margin-top: 2px; height: 16px; }
 
 @media (max-width: 767px) {
-  .kpi { padding: 8px 10px; }
-  .kpi .v { font-size: 16px; }
+  .kpi { padding: 6px 8px; }
+  .kpi .v { font-size: 14px; }
   .kpi .spark { display:none; }
 }
 
