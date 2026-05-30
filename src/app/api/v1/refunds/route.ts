@@ -17,6 +17,7 @@ export async function GET(req: Request) {
     const reason = url.searchParams.get('reason')
     const from = url.searchParams.get('from')
     const to = url.searchParams.get('to')
+    const q = url.searchParams.get('q')
     const page = Number(url.searchParams.get('page')) || 1
     const limit = Math.min(Number(url.searchParams.get('limit')) || 20, 100)
     const sortBy = url.searchParams.get('sort') || '-created_at'
@@ -29,6 +30,14 @@ export async function GET(req: Request) {
       where.created_at = {} as Record<string, Date>
       if (from) (where.created_at as Record<string, Date>).gte = new Date(from)
       if (to) (where.created_at as Record<string, Date>).lte = new Date(to)
+    }
+    if (q) {
+      where.OR = [
+        { id: { contains: q, mode: "insensitive" } },
+        { payment_id: { contains: q, mode: "insensitive" } },
+        { seller_profile_id: { contains: q, mode: "insensitive" } },
+        { gateway_reference: { contains: q, mode: "insensitive" } },
+      ]
     }
 
     const skip = (page - 1) * limit

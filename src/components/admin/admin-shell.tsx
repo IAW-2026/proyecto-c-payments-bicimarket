@@ -5,6 +5,7 @@ import { UserButton } from "@clerk/nextjs"
 import { useState, useEffect, useCallback } from "react"
 
 import { Icons, Glyph } from "@/lib/icons"
+import { ThemeToggle } from "@/components/admin/theme-toggle"
 import type { ReactNode } from "react"
 
 // Module-level state — persists across AdminShell mount/unmount on page navigation
@@ -31,7 +32,6 @@ function Sidebar({ active, open, onClose }: { active: string; open: boolean; onC
             <div className="brand-name">BiciMarket</div>
             <div className="brand-sub">Payments</div>
           </div>
-          <button className="sidebar-close icon-btn" onClick={onClose} aria-label="Cerrar menú de navegación"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
         </div>
         <div className="nav">
           <div className="nav-section">General</div>
@@ -96,6 +96,7 @@ function Topbar({ crumbs, onMenuClick, sidebarOpen }: { crumbs: string[]; onMenu
         ))}
       </div>
       <div className="topbar-spacer" />
+      <ThemeToggle />
       <UserButton />
     </div>
   )

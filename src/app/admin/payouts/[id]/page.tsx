@@ -7,7 +7,18 @@ import { AdminShell } from "@/components/admin/admin-shell"
 import { Icons } from "@/lib/icons"
 import { ARS, formatDate } from "@/lib/currency"
 import { usePayout, useMarkPayoutPaid } from "@/hooks/use-settlements"
+import { useState } from "react"
 import { useToast } from "@/hooks/use-toast"
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogAction,
+  AlertDialogCancel,
+} from "@/components/ui/alert-dialog"
 
 const payoutStatusLabels: Record<string, string> = {
   pending: "pendiente",
@@ -31,8 +42,10 @@ export default function PayoutDetailPage() {
     toast({ description: "ID copiado al portapapeles" })
   }
 
+  const [alertOpen, setAlertOpen] = useState(false)
+
   const handleMarkPaid = async () => {
-    if (!confirm("¿Marcar este pago a vendedor como pagado?")) return
+    setAlertOpen(false)
     await markPaid.mutateAsync(payoutId)
     toast({ description: "Pago a vendedor marcado como pagado" })
   }
@@ -95,7 +108,7 @@ export default function PayoutDetailPage() {
           <div className="btn-group">
             <button className="btn btn-secondary" onClick={() => handleCopy(d.id)}><Icons.Copy /> Copiar ID</button>
             {d.status !== "completed" && (
-              <button className="btn btn-primary" onClick={handleMarkPaid} disabled={markPaid.isPending}>
+              <button className="btn btn-primary" onClick={() => setAlertOpen(true)} disabled={markPaid.isPending}>
                 {markPaid.isPending ? <><Icons.Retry /> Marcando…</> : <><Icons.Check /> Marcar como pagado</>}
               </button>
             )}
@@ -230,6 +243,23 @@ export default function PayoutDetailPage() {
           </div>
         </div>
       </div>
+
+      <AlertDialog open={alertOpen} onOpenChange={setAlertOpen}>
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Marcar como pagado</AlertDialogTitle>
+            <AlertDialogDescription>
+              ¿Confirmás que querés marcar este pago a vendedor como pagado?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleMarkPaid} disabled={markPaid.isPending}>
+              {markPaid.isPending ? "Marcando…" : "Sí, marcar como pagado"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </AdminShell>
   )
 }

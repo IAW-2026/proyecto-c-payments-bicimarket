@@ -10,6 +10,7 @@ export interface RefundFilters {
   reason?: string
   from?: string
   to?: string
+  q?: string
   page?: number
   limit?: number
   sort?: string
@@ -25,6 +26,7 @@ export function useRefunds(filters: RefundFilters = {}) {
       if (filters.reason) params.append('reason', filters.reason)
       if (filters.from) params.append('from', filters.from)
       if (filters.to) params.append('to', filters.to)
+      if (filters.q) params.append('q', filters.q)
       params.append('page', String(filters.page || 1))
       params.append('limit', String(filters.limit || 20))
       if (filters.sort) params.append('sort', filters.sort)

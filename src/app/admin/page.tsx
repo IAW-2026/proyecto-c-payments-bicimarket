@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useMemo } from "react"
+import { useMemo, useState } from "react"
 
 import { AdminShell } from "@/components/admin/admin-shell"
 import { Delta } from "@/components/admin/delta"
@@ -55,8 +55,18 @@ function halfChange(items: number[]) {
 }
 
 export default function AdminDashboardPage() {
-  const payments = usePayments({ limit: 100 })
-  const settlements = useSettlements({ limit: 100 })
+  const [dateRange, setDateRange] = useState("")
+
+  const dateFrom = useMemo(() => {
+    if (!dateRange) return undefined
+    const now = Date.now()
+    const map: Record<string, number> = { today: 0, "7d": 7, "30d": 30, "90d": 90, "1y": 365 }
+    const days = map[dateRange]
+    return days !== undefined ? new Date(now - days * 86400000).toISOString() : undefined
+  }, [dateRange])
+
+  const payments = usePayments({ limit: 100, from: dateFrom })
+  const settlements = useSettlements({ limit: 100, from: dateFrom })
   const isRefreshing = payments.isFetching || settlements.isFetching
   const refresh = () => { payments.refetch(); settlements.refetch() }
 
@@ -125,8 +135,21 @@ export default function AdminDashboardPage() {
         </div>
         <div className="btn-group">
           <button className="btn btn-secondary" onClick={refresh} disabled={isRefreshing}>{isRefreshing ? <><Icons.Retry /> Refrescando…</> : <><Icons.Retry /> Refrescar</>}</button>
-          <button className="btn btn-secondary"><Icons.Calendar /> Últimos 30 días</button>
         </div>
+      </div>
+
+      <div className="filterbar">
+        <span style={{ flex: 1 }} />
+        <span className={`filter-chip ${dateRange === "today" ? "active" : ""}`} onClick={() => setDateRange(dateRange === "today" ? "" : "today")}>Hoy</span>
+        <span className={`filter-chip ${dateRange === "7d" ? "active" : ""}`} onClick={() => setDateRange(dateRange === "7d" ? "" : "7d")}>7 días</span>
+        <span className={`filter-chip ${dateRange === "30d" ? "active" : ""}`} onClick={() => setDateRange(dateRange === "30d" ? "" : "30d")}>30 días</span>
+        <span className={`filter-chip ${dateRange === "90d" ? "active" : ""}`} onClick={() => setDateRange(dateRange === "90d" ? "" : "90d")}>3 meses</span>
+        <span className={`filter-chip ${dateRange === "1y" ? "active" : ""}`} onClick={() => setDateRange(dateRange === "1y" ? "" : "1y")}>1 año</span>
+        {dateRange && (
+          <span className="filter-chip" style={{ color: "var(--destructive)", borderColor: "transparent" }} onClick={() => setDateRange("")}>
+            Limpiar filtros
+          </span>
+        )}
       </div>
 
       <div className="grid-4" style={{ marginBottom: 20 }}>
@@ -191,7 +214,7 @@ export default function AdminDashboardPage() {
                   <th>Pago</th>
                   <th className="num">Monto</th>
                   <th>Estado</th>
-                  <th style={{ textAlign: "right" }}>Fecha</th>
+                  <th>Fecha</th>
                 </tr>
               </thead>
               <tbody>
@@ -210,7 +233,7 @@ export default function AdminDashboardPage() {
                       </td>
                       <td className="num tnum" style={{ fontWeight: 500 }}>{ARS(p.amount_cents)}</td>
                       <td><span className={`badge ${p.status}`}><span className="dot" />{{ approved: "aprobado", pending: "pendiente", rejected: "rechazado", cancelled: "cancelado", refunded: "reembolsado" }[p.status] ?? p.status}</span></td>
-                      <td style={{ textAlign: "right" }} className="muted">{formatDate(p.created_at)}</td>
+                      <td className="muted">{formatDate(p.created_at)}</td>
                     </tr>
                   ))
                 )}

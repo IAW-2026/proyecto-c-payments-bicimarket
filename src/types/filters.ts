@@ -4,6 +4,7 @@ export interface PaymentFilters {
   status?: string | null
   from?: string
   to?: string
+  q?: string
   page?: number
   limit?: number
 }
@@ -14,6 +15,7 @@ export interface SettlementFilters {
   status?: string | null
   from?: string
   to?: string
+  q?: string
   page?: number
   limit?: number
 }
@@ -21,6 +23,7 @@ export interface SettlementFilters {
 export interface PayoutFilters {
   settlementId?: string
   status?: string
+  q?: string
   page?: number
   limit?: number
 }

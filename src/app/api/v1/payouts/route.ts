@@ -12,6 +12,8 @@ export async function GET(req: Request) {
     const url = new URL(req.url)
     const settlementId = url.searchParams.get('settlementId')
     const status = url.searchParams.get('status')
+    const q = url.searchParams.get('q')
+    const from = url.searchParams.get('from')
     const page = Number(url.searchParams.get('page')) || 1
     const limit = Math.min(Number(url.searchParams.get('limit')) || 20, 100)
     const sortBy = url.searchParams.get('sort') || '-created_at'
@@ -19,6 +21,14 @@ export async function GET(req: Request) {
     const where: Record<string, unknown> = { deleted_at: null }
     if (settlementId) where.settlement_id = settlementId
     if (status) where.status = status
+    if (from) where.created_at = { gte: new Date(from) }
+    if (q) {
+      where.OR = [
+        { id: { contains: q, mode: "insensitive" } },
+        { settlement_id: { contains: q, mode: "insensitive" } },
+        { transfer_id: { contains: q, mode: "insensitive" } },
+      ]
+    }
 
     const skip = (page - 1) * limit
 

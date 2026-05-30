@@ -26,6 +26,37 @@ const SELLERS = [
   { id: "seller_030" },
 ]
 
+const pad = (n: number) => String(n).padStart(3, "0")
+
+const ALL_BUYERS = [
+  ...BUYERS,
+  ...Array.from({ length: 8 }, (_, i) => ({
+    id: `buyer_${pad(i + 4)}`,
+    clerk: `user_2buyerClerkId${pad(i + 4)}`,
+  })),
+]
+
+const ALL_SELLERS = [
+  ...SELLERS,
+  ...Array.from({ length: 10 }, (_, i) => ({
+    id: `seller_${pad((i + 4) * 10)}`,
+  })),
+]
+
+const AMOUNTS = [50000, 120000, 300000, 500000, 750000, 1000000, 1500000, 2000000, 2500000, 3500000]
+
+const METHODS: Array<"credit_card" | "debit_card" | "account_money" | "bank_transfer"> = [
+  "credit_card", "debit_card", "account_money", "bank_transfer",
+]
+
+const REFUND_REASONS: Array<"buyer_cancelled" | "not_delivered" | "seller_rejected" | "manual"> = [
+  "buyer_cancelled", "not_delivered", "seller_rejected", "manual",
+]
+
+const PAYOUT_REASONS = [
+  "requested_by_admin", "requested_by_seller", "scheduled_payout", "manual_processing",
+]
+
 async function main() {
   console.log("Seeding database …")
 
@@ -668,16 +699,304 @@ async function main() {
     },
   })
 
+  // ─── Fill gaps in existing data ───
+  // Receipt for pay_seed_011 (was missing)
+  await prisma.receipt.upsert({
+    where: { id: "rcpt_seed_011" },
+    create: { id: "rcpt_seed_011", payment_id: "pay_seed_011", receipt_number: "RCP-0011", receipt_url: "https://example.com/receipts/rcp-0011.pdf", amount_cents: 450000, issued_at: daysAgo(15), created_at: daysAgo(15) },
+    update: {},
+  })
+
+  // Payouts for existing settlements that lack them
+  const settlementsWithoutPayout = await prisma.settlement.findMany({
+    where: { payouts: { none: {} }, status: { in: ["paid", "pending"] } },
+  })
+  for (const s of settlementsWithoutPayout) {
+    await prisma.payout.create({
+      data: {
+        settlement_id: s.id,
+        transfer_id: s.status === "paid" ? `trf_fill_${s.id.slice(0, 8)}` : undefined,
+        status: s.status === "paid" ? "completed" : "pending",
+        attempts: s.status === "paid" ? 1 : 0,
+        ...(s.status === "paid" ? { started_at: daysAgo(12), completed_at: daysAgo(12) } : {}),
+        created_at: s.created_at,
+      },
+    })
+  }
+
+  // ─── Bulk data generation (~30 per category) ───
+  const BULK_COUNT = 35
+  let bulkRefundCount = 0, bulkWebhookCount = 0, bulkIdempotentCount = 0
+
+  for (let i = 0; i < BULK_COUNT; i++) {
+    const idx = pad(i + 1)
+    const buyer = ALL_BUYERS[i % ALL_BUYERS.length]
+    const singleSeller = ALL_SELLERS[i % ALL_SELLERS.length]
+
+    // status distribution
+    let status: "approved" | "pending" | "rejected" | "refunded" | "cancelled"
+    if (i < 20) status = "approved"
+    else if (i < 24) status = "pending"
+    else if (i < 27) status = "rejected"
+    else if (i < 30) status = "refunded"
+    else status = "cancelled"
+
+    const amount = AMOUNTS[i % AMOUNTS.length]
+    const method = METHODS[i % METHODS.length]
+    const daysBack = 1 + i * 2 // spread over ~70 days
+    const isMultiSeller = status === "approved" && i % 5 === 0 // every 5th approved is multi-seller
+    const secondSeller = isMultiSeller ? ALL_SELLERS[(i + 3) % ALL_SELLERS.length] : null
+
+    const payment = await prisma.payment.create({
+      data: {
+        id: `pay_bulk_${idx}`,
+        order_id: `order_bulk_${idx}`,
+        buyer_profile_id: buyer.id,
+        buyer_clerk_user_id: buyer.clerk,
+        amount_cents: amount,
+        currency: "ARS",
+        status,
+        method,
+        ...(status === "approved" || status === "refunded" ? {
+          card_last4: String(1000 + i).slice(-4),
+          gateway_reference: `mp_bulk_${idx}`,
+          approved_at: daysAgo(daysBack),
+        } : {}),
+        ...(status === "rejected" ? {
+          card_last4: "0000",
+          gateway_reference: `mp_bulk_${idx}`,
+          rejected_at: daysAgo(daysBack),
+        } : {}),
+        ...(status === "cancelled" ? {
+          cancelled_at: daysAgo(daysBack),
+        } : {}),
+        ...(status !== "pending" ? {
+          items_summary: [
+            {
+              seller_profile_id: singleSeller.id,
+              subtotal_cents: amount - Math.round(amount * 0.1),
+              shipping_cost_cents: Math.round(amount * 0.1),
+              order_seller_group_id: `sg_bulk_${idx}`,
+              buyer_profile_id: buyer.id,
+              buyer_clerk_user_id: buyer.clerk,
+            },
+            ...(secondSeller ? [{
+              seller_profile_id: secondSeller.id,
+              subtotal_cents: Math.round(amount * 0.4),
+              shipping_cost_cents: Math.round(amount * 0.05),
+              order_seller_group_id: `sg_bulk_${idx}b`,
+              buyer_profile_id: buyer.id,
+              buyer_clerk_user_id: buyer.clerk,
+            }] : []),
+          ],
+        } : {}),
+        created_at: daysAgo(daysBack),
+      },
+    })
+
+    // status history
+    if (status === "approved") {
+      await prisma.paymentStatusHistory.create({
+        data: { payment_id: payment.id, from_status: "pending", to_status: "approved", changed_by: "system", reason: "payment_approved", created_at: daysAgo(daysBack) },
+      })
+    } else if (status === "rejected") {
+      await prisma.paymentStatusHistory.create({
+        data: { payment_id: payment.id, from_status: "pending", to_status: "rejected", changed_by: "system", reason: "card_rejected", created_at: daysAgo(daysBack) },
+      })
+    } else if (status === "refunded") {
+      await prisma.paymentStatusHistory.create({
+        data: { payment_id: payment.id, from_status: "approved", to_status: "refunded", changed_by: "system", reason: "full_refund", created_at: daysAgo(daysBack - 1) },
+      })
+    }
+
+    // attempt for rejected
+    if (status === "rejected") {
+      await prisma.paymentAttempt.create({
+        data: { payment_id: payment.id, attempt_number: 1, provider: "mercadopago", status: "rejected", error_code: "cc_rejected_generic", error_message: "La tarjeta fue rechazada", created_at: daysAgo(daysBack) },
+      })
+    }
+
+    // receipt + settlement + payout for approved / refunded
+    if (status === "approved" || status === "refunded") {
+      const fee = Math.round(amount * 0.1)
+      const net = amount - fee
+
+      await prisma.receipt.create({
+        data: {
+          payment_id: payment.id,
+          receipt_number: `RCP-BLK-${idx}`,
+          receipt_url: `https://example.com/receipts/rcp-blk-${idx}.pdf`,
+          amount_cents: amount,
+          issued_at: daysAgo(daysBack),
+          created_at: daysAgo(daysBack),
+        },
+      })
+
+      const sStatus: "paid" | "pending" | "failed" | "manual_review" =
+        i % 7 === 0 ? "pending" : i % 7 === 1 ? "failed" : i % 7 === 2 ? "manual_review" : "paid"
+
+      const s1 = await prisma.settlement.create({
+        data: {
+          payment_id: payment.id,
+          order_id: `order_bulk_${idx}`,
+          order_seller_group_id: `sg_bulk_${idx}`,
+          seller_profile_id: singleSeller.id,
+          gross_amount_cents: amount,
+          fee_amount_cents: fee,
+          net_amount_cents: net,
+          status: sStatus,
+          ...(sStatus === "paid" ? { paid_at: daysAgo(daysBack - 2) } : {}),
+          created_at: daysAgo(daysBack),
+        },
+      })
+
+      if (sStatus === "paid" || sStatus === "pending") {
+        await prisma.payout.create({
+          data: {
+            settlement_id: s1.id,
+            transfer_id: sStatus === "paid" ? `trf_bulk_${idx}` : undefined,
+            status: sStatus === "paid" ? "completed" : "pending",
+            attempts: sStatus === "paid" ? 1 : 0,
+            ...(sStatus === "paid" ? { started_at: daysAgo(daysBack - 2), completed_at: daysAgo(daysBack - 2) } : {}),
+            last_error: sStatus === "pending" && i % 3 === 0 ? "Saldo insuficiente en la cuenta de origen" : undefined,
+            created_at: daysAgo(daysBack),
+          },
+        })
+      }
+
+      // second settlement for multi-seller
+      if (secondSeller) {
+        const s2 = await prisma.settlement.create({
+          data: {
+            payment_id: payment.id,
+            order_id: `order_bulk_${idx}`,
+            order_seller_group_id: `sg_bulk_${idx}b`,
+            seller_profile_id: secondSeller.id,
+            gross_amount_cents: Math.round(amount * 0.45),
+            fee_amount_cents: Math.round(amount * 0.045),
+            net_amount_cents: Math.round(amount * 0.405),
+            status: "pending",
+            created_at: daysAgo(daysBack),
+          },
+        })
+        await prisma.payout.create({
+          data: {
+            settlement_id: s2.id,
+            status: "in_progress",
+            attempts: 1,
+            started_at: daysAgo(daysBack - 1),
+            last_error: "La transferencia está siendo procesada",
+            created_at: daysAgo(daysBack),
+          },
+        })
+      }
+
+      // refund for refunded status and some approved
+      if (status === "refunded" || (status === "approved" && i % 4 === 3)) {
+        const refAmount = status === "refunded" ? amount : Math.round(amount * 0.3)
+        const refStatus: "approved" | "pending" | "failed" =
+          i % 10 === 0 ? "failed" : i % 10 === 1 ? "pending" : "approved"
+
+        const refund = await prisma.refund.create({
+          data: {
+            payment_id: payment.id,
+            seller_profile_id: singleSeller.id,
+            amount_cents: refAmount,
+            reason: REFUND_REASONS[i % REFUND_REASONS.length],
+            status: refStatus,
+            gateway_reference: refStatus !== "pending" ? `mp_refund_bulk_${idx}` : undefined,
+            created_at: daysAgo(status === "refunded" ? daysBack - 1 : daysBack),
+          },
+        })
+
+        await prisma.refundStatusHistory.create({
+          data: {
+            refund_id: refund.id,
+            from_status: refStatus === "approved" ? "pending" : refStatus === "failed" ? "pending" : null,
+            to_status: refStatus,
+            changed_by: "system",
+            reason: refStatus === "approved" ? "refund_processed" : refStatus === "failed" ? "refund_failed" : "pending",
+            created_at: daysAgo(status === "refunded" ? daysBack - 1 : daysBack),
+          },
+        })
+        bulkRefundCount++
+      }
+    }
+
+    // webhook events (one per payment)
+    if (status === "approved" || status === "rejected" || status === "refunded") {
+      await prisma.mpWebhookEvent.create({
+        data: {
+          mp_event_id: `mp_evt_bulk_${idx}`,
+          event_type: `payment.${status === "refunded" ? "refunded" : status === "rejected" ? "rejected" : "approved"}`,
+          payload: { action: `payment.${status}`, data: { id: payment.id } },
+          signature_valid: status !== "rejected",
+          status: "processed",
+          processed_at: daysAgo(daysBack - 1),
+          created_at: daysAgo(daysBack),
+        },
+      })
+      bulkWebhookCount++
+    }
+
+    // idempotency key for approved payments
+    if (status === "approved") {
+      await prisma.idempotencyKey.create({
+        data: {
+          key: `idemp_bulk_${idx}`,
+          response: { id: payment.id, status: "approved" },
+          status: 200,
+          expires_at: daysAgo(-30),
+          created_at: daysAgo(daysBack),
+        },
+      })
+      bulkIdempotentCount++
+    }
+  }
+
+  // ─── Additional webhook events (edge cases) ───
+  await prisma.mpWebhookEvent.create({
+    data: {
+      mp_event_id: "mp_evt_bulk_pending",
+      event_type: "payment.pending",
+      payload: { action: "payment.created", data: { id: "pay_bulk_001" } },
+      signature_valid: true,
+      status: "received",
+      created_at: daysAgo(2),
+    },
+  })
+
+  await prisma.mpWebhookEvent.create({
+    data: {
+      mp_event_id: "mp_evt_bulk_failed",
+      event_type: "merchant_order.created",
+      payload: { action: "test", data: {} },
+      signature_valid: false,
+      status: "failed",
+      last_error: "HMAC signature mismatch",
+      created_at: hoursAgo(6),
+    },
+  })
+
   console.log("Seed complete!")
+  const counts = {
+    payments: await prisma.payment.count(),
+    receipts: await prisma.receipt.count(),
+    settlements: await prisma.settlement.count(),
+    payouts: await prisma.payout.count(),
+    refunds: await prisma.refund.count(),
+    webhooks: await prisma.mpWebhookEvent.count(),
+    idempotency: await prisma.idempotencyKey.count(),
+  }
   console.log(
-    `  Payments: 11 (approved: 6, pending: 1, rejected: 1, cancelled: 1, refunded: 1, partial-refund-hold: 1)`,
+    `  Payments: ${counts.payments}`,
   )
-  console.log(`  Settlements: 10 (pending: 5, paid: 3, failed: 1, manual_review: 1)`)
-  console.log(`  Payouts: 4 (pending: 1, completed: 3)`)
-  console.log(`  Refunds: 3 (approved: 1, pending: 1, failed: 1)`)
-  console.log(`  Receipts: 7`)
-  console.log(`  Webhook events: 4`)
-  console.log(`  Idempotency keys: 1`)
+  console.log(`  Settlements: ${counts.settlements}`)
+  console.log(`  Payouts: ${counts.payouts}`)
+  console.log(`  Refunds: ${counts.refunds}`)
+  console.log(`  Receipts: ${counts.receipts}`)
+  console.log(`  Webhook events: ${counts.webhooks}`)
+  console.log(`  Idempotency keys: ${counts.idempotency}`)
 }
 
 main()

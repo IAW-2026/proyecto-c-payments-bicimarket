@@ -1,12 +1,14 @@
 "use client"
 
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { useMemo, useState } from "react"
 
 import { AdminShell } from "@/components/admin/admin-shell"
 import { Paginator } from "@/components/admin/paginator"
 import { Icons } from "@/lib/icons"
 import { ARS, formatDate } from "@/lib/currency"
+import { downloadCsv } from "@/lib/csv"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { usePayouts } from "@/hooks/use-settlements"
 import { useToast } from "@/hooks/use-toast"
@@ -16,16 +18,39 @@ function copy(text: string) { navigator.clipboard.writeText(text) }
 
 export default function PayoutsPage() {
   const { toast } = useToast()
+  const router = useRouter()
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [tab, setTab] = useState("queue")
+  const [sortKey, setSortKey] = useState("")
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
+  const [searchQ, setSearchQ] = useState("")
+  const [dateRange, setDateRange] = useState("")
 
-  const filters = useMemo<PayoutFilters>(() => ({ page, limit: 20 }), [page])
+  const dateFrom = useMemo(() => {
+    if (!dateRange) return undefined
+    const now = Date.now()
+    const map: Record<string, number> = { today: 0, "7d": 7, "30d": 30, "90d": 90, "1y": 365 }
+    const days = map[dateRange]
+    return days !== undefined ? new Date(now - days * 86400000).toISOString() : undefined
+  }, [dateRange])
+
+  const filters = useMemo<PayoutFilters>(() => ({ page, limit: 20, q: searchQ || undefined, ...(dateFrom ? { from: dateFrom } : {}) }), [page, searchQ, dateFrom])
 
   const payoutsQuery = usePayouts(filters)
 
   const payouts = payoutsQuery.data?.data ?? []
   const pagination = payoutsQuery.data?.pagination ?? { page: 1, limit: 20, total: 0, has_more: false }
+
+  const handleSort = (key: string) => {
+    if (sortKey === key) { setSortDir(d => d === "asc" ? "desc" : "asc") }
+    else { setSortKey(key); setSortDir("desc") }
+  }
+
+  const sortIcon = (key: string) => {
+    if (sortKey !== key) return <Icons.Down style={{ opacity: 0.25 }} />
+    return <Icons.Down style={{ transform: sortDir === "asc" ? "rotate(180deg)" : undefined, transition: "transform .2s" }} />
+  }
 
   const toggleSelect = (id: string) => {
     const next = new Set(selected)
@@ -45,6 +70,16 @@ export default function PayoutsPage() {
 
   const displayedPayouts = tab === "attention" ? failed : tab === "history" ? completed : [...scheduled, ...inProgress]
 
+  const sortedPayouts = useMemo(() => {
+    if (!sortKey) return displayedPayouts
+    return [...displayedPayouts].sort((a, b) => {
+      const va = sortKey === "amount" ? (a.settlement?.gross_amount_cents ?? 0) : a.created_at
+      const vb = sortKey === "amount" ? (b.settlement?.gross_amount_cents ?? 0) : b.created_at
+      const cmp = va < vb ? -1 : va > vb ? 1 : 0
+      return sortDir === "asc" ? cmp : -cmp
+    })
+  }, [displayedPayouts, sortKey, sortDir])
+
   const totals = useMemo(() => {
     let pendingAmount = 0, inProgressAmount = 0
     for (const p of payouts) {
@@ -62,15 +97,9 @@ export default function PayoutsPage() {
 
   const exportCsv = (onlySelected = false) => {
     const items = onlySelected ? payouts.filter((p) => selected.has(p.id)) : payouts
-    const header = ["id", "settlement_id", "status", "created_at"].join(",")
-    const rows = items.map((p) =>
-      [p.id, p.settlement_id, p.status, p.created_at]
-        .map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","),
-    )
-    const blob = new Blob([[header, ...rows].join("\n")], { type: "text/csv;charset=utf-8;" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a"); a.href = url; a.download = `payouts-${Date.now()}.csv`; a.click()
-    URL.revokeObjectURL(url)
+    const header = ["id", "settlement_id", "status", "created_at"]
+    const rows = items.map((p) => [p.id, p.settlement_id, p.status, p.created_at])
+    downloadCsv("payouts", header, rows)
   }
 
   return (
@@ -100,6 +129,22 @@ export default function PayoutsPage() {
         <div className={`tab ${tab === "history" ? "active" : ""}`} onClick={() => setTab("history")}>Historial<span className="ct">{completed.length}</span></div>
       </div>
 
+      <div className="filterbar">
+        <input type="search" className="search-input" placeholder="Buscar…" value={searchQ} onChange={e => { setSearchQ(e.target.value); setPage(1) }} />
+        <span style={{ flex: 1 }} />
+        <span className="muted" style={{ fontSize: 12, marginRight: 4 }}>Filtros rápidos:</span>
+        <span className={`filter-chip ${dateRange === "today" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "today" ? "" : "today"); setPage(1) }}>Hoy</span>
+        <span className={`filter-chip ${dateRange === "7d" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "7d" ? "" : "7d"); setPage(1) }}>7 días</span>
+        <span className={`filter-chip ${dateRange === "30d" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "30d" ? "" : "30d"); setPage(1) }}>30 días</span>
+        <span className={`filter-chip ${dateRange === "90d" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "90d" ? "" : "90d"); setPage(1) }}>3 meses</span>
+        <span className={`filter-chip ${dateRange === "1y" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "1y" ? "" : "1y"); setPage(1) }}>1 año</span>
+        {(dateRange || searchQ) && (
+          <span className="filter-chip" style={{ color: "var(--destructive)", borderColor: "transparent" }} onClick={() => { setDateRange(""); setSearchQ(""); setPage(1) }}>
+            Limpiar filtros
+          </span>
+        )}
+      </div>
+
       <div className="card">
         <div className="card-head" style={{ justifyContent: "space-between" }}>
           <h2 className="sec-title">{tab === "attention" ? "Fallidos" : tab === "history" ? "Completados" : "Cola de pagos"}</h2>
@@ -116,7 +161,7 @@ export default function PayoutsPage() {
                 <th>ID</th>
                 <th>Liquidación</th>
                 <th>Estado</th>
-                <th className="num">Monto</th>
+                <th className="num"><span className="sort-h" onClick={() => handleSort("amount")}>Monto {sortIcon("amount")}</span></th>
                 <th className="actions-cell"></th>
               </tr>
             </thead>
@@ -132,18 +177,18 @@ export default function PayoutsPage() {
                     </td>
                   </tr>
                 ) : (
-                  displayedPayouts.map((p) => (
-                  <tr key={p.id} className={selected.has(p.id) ? "row-selected" : ""}>
-                    <td className="checkbox-cell">
+                  sortedPayouts.map((p) => (
+                  <tr key={p.id} className={selected.has(p.id) ? "row-selected" : ""} onClick={() => router.push(`/admin/payouts/${p.id}`)} style={{ cursor: "pointer" }}>
+                    <td className="checkbox-cell" onClick={e => e.stopPropagation()}>
                       <span className={`cb ${selected.has(p.id) ? "checked" : ""}`} onClick={() => toggleSelect(p.id)}>
                         {selected.has(p.id) ? <Icons.Check /> : null}
                       </span>
                     </td>
-                    <td className="id"><Link href={`/admin/payouts/${p.id}`} className="row-link">{p.id}</Link></td>
+                    <td className="id"><Link href={`/admin/payouts/${p.id}`} className="row-link" onClick={e => e.stopPropagation()}>{p.id}</Link></td>
                     <td className="id">{p.settlement_id.slice(0, 14)}…</td>
                     <td><span className={`badge ${p.status}`}><span className="dot" />{{ pending: "pendiente", in_progress: "en curso", completed: "completado", failed: "fallido", manual_review: "revisión manual" }[p.status] ?? p.status}</span></td>
                     <td className="num tnum" style={{ fontWeight: 500 }}>{ARS(p.settlement?.gross_amount_cents ?? 0)}</td>
-                    <td className="actions-cell"><span className="icon-btn" onClick={() => handleCopy(p.id)} title="Copiar ID"><Icons.Copy /></span></td>
+                    <td className="actions-cell" onClick={e => e.stopPropagation()}><span className="icon-btn" onClick={() => handleCopy(p.id)} title="Copiar ID"><Icons.Copy /></span></td>
                   </tr>
                 ))
               )}

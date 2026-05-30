@@ -17,6 +17,7 @@ export async function GET(req: Request) {
     const paymentId = url.searchParams.get('paymentId')
     const from = url.searchParams.get('from')
     const to = url.searchParams.get('to')
+    const q = url.searchParams.get('q')
     const page = Number(url.searchParams.get('page')) || 1
     const limit = Math.min(Number(url.searchParams.get('limit')) || 20, 100)
     const skip = (page - 1) * limit
@@ -28,6 +29,13 @@ export async function GET(req: Request) {
       where.issued_at = {} as Record<string, Date>
       if (from) (where.issued_at as Record<string, Date>).gte = new Date(from)
       if (to) (where.issued_at as Record<string, Date>).lte = new Date(to)
+    }
+    if (q) {
+      where.OR = [
+        { id: { contains: q, mode: "insensitive" } },
+        { payment_id: { contains: q, mode: "insensitive" } },
+        { receipt_number: { contains: q, mode: "insensitive" } },
+      ]
     }
 
     const sortField = sortBy.startsWith('-') ? sortBy.slice(1) : sortBy

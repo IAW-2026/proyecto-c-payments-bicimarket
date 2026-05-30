@@ -7,10 +7,12 @@ import { AdminShell } from "@/components/admin/admin-shell"
 import { Paginator } from "@/components/admin/paginator"
 import { Icons } from "@/lib/icons"
 import { ARS, formatDate } from "@/lib/currency"
+import { downloadCsv } from "@/lib/csv"
 import Link from "next/link"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { useToast } from "@/hooks/use-toast"
-import { useState } from "react"
+import { useMemo, useState } from "react"
+import { useRouter } from "next/navigation"
 
 interface Receipt {
   id: string
@@ -23,17 +25,27 @@ interface Receipt {
 
 export default function ReceiptsPage() {
   const { toast } = useToast()
+  const router = useRouter()
   const [page, setPage] = useState(1)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [dateRange, setDateRange] = useState<string>("")
+  const [sortKey, setSortKey] = useState("")
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
+  const [searchQ, setSearchQ] = useState("")
 
   const { data, isLoading, isFetching, refetch } = useQuery({
-    queryKey: ["receipts", page, dateRange],
+    queryKey: ["receipts", page, dateRange, searchQ],
     queryFn: async () => {
       const params = new URLSearchParams()
       params.append("page", String(page))
       params.append("limit", "20")
-      if (dateRange) params.append("from", new Date(Date.now() - Number(dateRange) * 86400000).toISOString().slice(0, 10))
+      if (dateRange) {
+        const now = Date.now()
+        const map: Record<string, number> = { today: 0, "7d": 7, "30d": 30, "90d": 90, "1y": 365 }
+        const days = map[dateRange]
+        if (days !== undefined) params.append("from", new Date(now - days * 86400000).toISOString().slice(0, 10))
+      }
+      if (searchQ) params.append("q", searchQ)
       const { data } = await axios.get(`/api/v1/receipts?${params.toString()}`)
       return data as { data: Receipt[]; pagination: { page: number; limit: number; total: number; has_more: boolean } }
     },
@@ -41,6 +53,26 @@ export default function ReceiptsPage() {
 
   const receipts = data?.data ?? []
   const pagination = data?.pagination ?? { page: 1, limit: 20, total: 0, has_more: false }
+
+  const handleSort = (key: string) => {
+    if (sortKey === key) { setSortDir(d => d === "asc" ? "desc" : "asc") }
+    else { setSortKey(key); setSortDir("desc") }
+  }
+
+  const sortedReceipts = useMemo(() => {
+    if (!sortKey) return receipts
+    return [...receipts].sort((a, b) => {
+      const va = sortKey === "amount" ? a.amount_cents : a.issued_at
+      const vb = sortKey === "amount" ? b.amount_cents : b.issued_at
+      const cmp = va < vb ? -1 : va > vb ? 1 : 0
+      return sortDir === "asc" ? cmp : -cmp
+    })
+  }, [receipts, sortKey, sortDir])
+
+  const sortIcon = (key: string) => {
+    if (sortKey !== key) return <Icons.Down style={{ opacity: 0.25 }} />
+    return <Icons.Down style={{ transform: sortDir === "asc" ? "rotate(180deg)" : undefined, transition: "transform .2s" }} />
+  }
 
   const toggleSelect = (id: string) => {
     const next = new Set(selected)
@@ -60,15 +92,9 @@ export default function ReceiptsPage() {
 
   const exportCsv = (onlySelected = false) => {
     const items = onlySelected ? receipts.filter((r) => selected.has(r.id)) : receipts
-    const header = ["id", "payment_id", "receipt_number", "amount_cents", "issued_at"].join(",")
-    const rows = items.map((r) =>
-      [r.id, r.payment_id, r.receipt_number, r.amount_cents, r.issued_at]
-        .map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","),
-    )
-    const blob = new Blob([[header, ...rows].join("\n")], { type: "text/csv;charset=utf-8;" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a"); a.href = url; a.download = `receipts-${Date.now()}.csv`; a.click()
-    URL.revokeObjectURL(url)
+    const header = ["id", "payment_id", "receipt_number", "amount_cents", "issued_at"]
+    const rows = items.map((r) => [r.id, r.payment_id, r.receipt_number, String(r.amount_cents), r.issued_at])
+    downloadCsv("receipts", header, rows)
   }
 
   return (
@@ -86,16 +112,19 @@ export default function ReceiptsPage() {
       </div>
 
       <div className="filterbar">
-        <Icons.Filter />
-        <span className={`filter-chip ${dateRange === "7" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "7" ? "" : "7"); setPage(1) }}>7 días</span>
-        <span className={`filter-chip ${dateRange === "30" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "30" ? "" : "30"); setPage(1) }}>30 días</span>
-        <span className={`filter-chip ${dateRange === "90" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "90" ? "" : "90"); setPage(1) }}>90 días</span>
-        {dateRange && (
-          <span className="filter-chip" style={{ color: "var(--destructive)", borderColor: "transparent" }} onClick={() => { setDateRange(""); setPage(1) }}>
+        <input type="search" className="search-input" placeholder="Buscar…" value={searchQ} onChange={e => { setSearchQ(e.target.value); setPage(1) }} />
+        <span style={{ flex: 1 }} />
+        <span className="muted" style={{ fontSize: 12, marginRight: 4 }}>Filtros rápidos:</span>
+        <span className={`filter-chip ${dateRange === "today" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "today" ? "" : "today"); setPage(1) }}>Hoy</span>
+        <span className={`filter-chip ${dateRange === "7d" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "7d" ? "" : "7d"); setPage(1) }}>7 días</span>
+        <span className={`filter-chip ${dateRange === "30d" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "30d" ? "" : "30d"); setPage(1) }}>30 días</span>
+        <span className={`filter-chip ${dateRange === "90d" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "90d" ? "" : "90d"); setPage(1) }}>3 meses</span>
+        <span className={`filter-chip ${dateRange === "1y" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "1y" ? "" : "1y"); setPage(1) }}>1 año</span>
+        {(dateRange || searchQ) && (
+          <span className="filter-chip" style={{ color: "var(--destructive)", borderColor: "transparent" }} onClick={() => { setDateRange(""); setSearchQ(""); setPage(1) }}>
             Limpiar filtros
           </span>
         )}
-        <span style={{ flex: 1 }} />
       </div>
 
       <div className="card">
@@ -110,8 +139,8 @@ export default function ReceiptsPage() {
                 </th>
                 <th>Comprobante</th>
                 <th>Pago</th>
-                <th className="num">Monto</th>
-                <th>Emitido</th>
+                <th className="num"><span className="sort-h" onClick={() => handleSort("amount")}>Monto {sortIcon("amount")}</span></th>
+                <th><span className="sort-h" onClick={() => handleSort("date")}>Emitido {sortIcon("date")}</span></th>
                 <th className="actions-cell"></th>
               </tr>
             </thead>
@@ -133,14 +162,14 @@ export default function ReceiptsPage() {
                   </td>
                 </tr>
               ) : (
-                receipts.map((r) => (
-                  <tr key={r.id} className={selected.has(r.id) ? "row-selected" : ""}>
-                    <td className="checkbox-cell">
+                sortedReceipts.map((r) => (
+                  <tr key={r.id} className={selected.has(r.id) ? "row-selected" : ""} onClick={() => router.push(`/admin/receipts/${r.id}`)} style={{ cursor: "pointer" }}>
+                    <td className="checkbox-cell" onClick={e => e.stopPropagation()}>
                       <span className={`cb ${selected.has(r.id) ? "checked" : ""}`} onClick={() => toggleSelect(r.id)}>
                         {selected.has(r.id) ? <Icons.Check /> : null}
                       </span>
                     </td>
-                    <td>
+                    <td onClick={e => e.stopPropagation()}>
                       <Link href={`/admin/receipts/${r.id}`} className="col" style={{ textDecoration: "none" }}>
                         <span className="mono" style={{ fontSize: 12.5, fontWeight: 500, color: "var(--primary)" }}>{r.receipt_number}</span>
                         <span className="muted mono" style={{ fontSize: 11 }}>{r.id}</span>
@@ -149,7 +178,7 @@ export default function ReceiptsPage() {
                     <td className="id">{r.payment_id.slice(0, 18)}…</td>
                     <td className="num tnum">{ARS(r.amount_cents)}</td>
                     <td className="muted mono" style={{ fontSize: 12 }}>{formatDate(r.issued_at)}</td>
-                    <td className="actions-cell">
+                    <td className="actions-cell" onClick={e => e.stopPropagation()}>
                       <span className="icon-btn" onClick={() => handleCopy(r.id)} title="Copiar ID"><Icons.Copy /></span>
                     </td>
                   </tr>
