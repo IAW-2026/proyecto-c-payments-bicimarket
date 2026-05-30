@@ -23,7 +23,7 @@ const navItems = [
 function Sidebar({ active, open, onClose }: { active: string; open: boolean; onClose: () => void }) {
   return (
     <>
-      {open && <div className="sidebar-overlay" onClick={onClose} />}
+      <div className={`sidebar-overlay${open ? " open" : ""}`} onClick={onClose} />
       <aside className={`sidebar${open ? " open" : ""}`}>
         <div className="brand">
           <div className="brand-glyph"><Glyph /></div>
@@ -31,6 +31,7 @@ function Sidebar({ active, open, onClose }: { active: string; open: boolean; onC
             <div className="brand-name">BiciMarket</div>
             <div className="brand-sub">Payments</div>
           </div>
+          <button className="sidebar-close icon-btn" onClick={onClose} aria-label="Cerrar menú de navegación"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg></button>
         </div>
         <div className="nav">
           <div className="nav-section">General</div>
