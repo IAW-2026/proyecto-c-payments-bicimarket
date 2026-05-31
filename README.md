@@ -18,13 +18,14 @@ Módulo de pagos del marketplace BiciMarket. Administra pagos, reembolsos, liqui
 ## Instrucciones para probar MP:
  1. Entrar a /checkout para crear un pago, elegir el monto
  2. Iniciar sesión dentro de MP con las siguientes credenciales:
-  - email/dni/usuario: TESTUSER5539129628521320852
+  - email: test_user_5539129628521320852@testuser.com (en caso de que no esté ya iniciado, se envía en el body por defecto)
+  - usuario: TESTUSER5539129628521320852
   - contraseña: vDOl8CvAXy
   - código mail (en caso de que lo pida): 117641
- 3. Pagar con la tarjeta o dinero en cuenta de su gusto. (CVV: 123, DNI: 12345678)
+ 3. Pagar con la tarjeta o dinero en cuenta. (CVV: 123, DNI: 12345678)
  4. Chequear estado en la página de admin dentro de /payments.
 
-
+---
 
 ### Admin (Clerk)
 
@@ -34,10 +35,8 @@ Iniciar sesión en `/sign-in` con una cuenta Clerk que tenga `publicMetadata.adm
 
 ```env
 BUYER_TO_PAYMENTS_SERVICE_TOKEN=change-me-buyer-to-payments
-SELLER_TO_PAYMENTS_SERVICE_TOKEN=change-me-seller-to-payments
-SHIPPING_TO_PAYMENTS_SERVICE_TOKEN=change-me-shipping-to-payments
 PAYMENTS_TO_BUYER_SERVICE_TOKEN=change-me-payments-to-buyer
-PAYMENTS_TO_SELLER_SERVICE_TOKEN=change-me-payments-to-seller
+SHIPPING_TO_PAYMENTS_SERVICE_TOKEN=change-me-shipping-to-payments
 ```
 
 ---
@@ -67,7 +66,8 @@ npx prisma db seed
 npm run dev
 ```
 
-Abrir `http://localhost:3000`. Health check: `GET /api/health`.
+Abrir `http://localhost:3000`. Health check: `GET /api/health`. 
+Nota: mercadopago no va a funcionar en localhost, es más fácil hacer la prueba en vercel.
 
 ---
 
@@ -93,17 +93,17 @@ Toda la API vive bajo `/api/v1/`. Documentación interactiva en `/api-docs` (Swa
 ## Arquitectura
 
 ```
-┌─────────────┐     REST (X-Service-Token)     ┌──────────────┐
+┌─────────────┐     REST (X-Service-Token)       ┌──────────────┐
 │  Buyer App  │ ───────────────────────────────→ │              │
 │  Seller App │ ───────────────────────────────→ │ Payments App │
-│ Shipping App│ ─────── POST /shipment-delivered→ │              │
+│ Shipping App│ ────POST /shipment-delivered───→ │              │
 └─────────────┘                                  └──────┬───────┘
-                                                         │
-                                                 ┌───────▼────────┐
-                                                 │ Mercado Pago   │
-                                                 │ (Checkout Pro) │
-                                                 │ POST /webhooks │
-                                                 └────────────────┘
+                                                        │
+                                                ┌───────▼────────┐
+                                                │ Mercado Pago   │
+                                                │ (Checkout Pro) │
+                                                │ POST /webhooks │
+                                                └────────────────┘
 ```
 
 ---
