@@ -5,7 +5,7 @@ import { prisma } from '@/lib/prisma'
 import { extractIdempotencyKey, findByIdempotencyKey, checkIdempotency, cacheIdempotencyResponse } from '@/lib/idempotency'
 import { validateServiceTokenBuyer } from '@/lib/service-token'
 import { requireAdmin } from '@/lib/admin-auth'
-import { handleRouteError, badRequest } from '@/lib/errors'
+import { handleRouteError, badRequest, errorResponse } from '@/lib/errors'
 import { createPaymentSchema } from '@/schemas/payment'
 import mpService from '@/services/mercado-pago.service'
 
@@ -82,7 +82,7 @@ export async function POST(req: Request) {
 
     const idempotencyKey = extractIdempotencyKey(req)
     if (!idempotencyKey) {
-      return badRequest('Idempotency-Key header is required')
+      return badRequest('IDEMPOTENCY_KEY_REQUIRED', 'Idempotency-Key header is required')
     }
 
     const existing = await findByIdempotencyKey(idempotencyKey)
@@ -102,7 +102,7 @@ export async function POST(req: Request) {
     const parsed = createPaymentSchema.safeParse(body)
     if (!parsed.success) {
       console.warn(`[Payments:${requestId}] Validation failed:`, parsed.error.issues)
-      return badRequest('Validation failed', {
+      return badRequest('VALIDATION_FAILED', 'Validation failed', {
         errors: parsed.error.issues.map(i => ({ path: i.path.join('.'), message: i.message })),
       })
     }
@@ -115,7 +115,7 @@ export async function POST(req: Request) {
       }, 0)
 
       if (summedAmount !== validated.amount_cents) {
-        return badRequest(`items_summary total (${summedAmount}) does not match amount_cents (${validated.amount_cents})`, {
+        return badRequest('ITEMS_SUMMARY_MISMATCH', `items_summary total (${summedAmount}) does not match amount_cents (${validated.amount_cents})`, {
           expected: validated.amount_cents,
           received: summedAmount,
         })
@@ -186,15 +186,15 @@ export async function POST(req: Request) {
       })
 
       const responseBody = {
-        data: { payment_id: payment.id, init_point: body.init_point || body.sandbox_init_point, preference_id: body.id },
+        data: { payment_id: payment.id, checkout_url: body.init_point || body.sandbox_init_point, preference_id: body.id },
         public_key: mpService.getPublicKey?.(),
       }
 
       if (idempotencyKey) {
-        await cacheIdempotencyResponse(idempotencyKey, responseBody, 200)
+        await cacheIdempotencyResponse(idempotencyKey, responseBody, 201)
       }
 
-      return NextResponse.json(responseBody)
+      return NextResponse.json(responseBody, { status: 201 })
     } catch (mpErr) {
       console.error(`[Payments:${requestId}] Mercado Pago preference creation failed:`, mpErr)
       // record failed attempt
@@ -208,7 +208,7 @@ export async function POST(req: Request) {
           response_payload: (mpErr && (mpErr)) as any,
         },
       })
-      return NextResponse.json({ error: 'failed to create payment preference' }, { status: 502 })
+      return errorResponse('MP_PREFERENCE_FAILED', 'Failed to create Mercado Pago payment preference', 502)
     }
 
   } catch (err) {

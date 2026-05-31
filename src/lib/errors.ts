@@ -13,39 +13,51 @@ export function errorResponse(code: string, message: string, status: number, det
   return NextResponse.json({ error: { code, message, details } } satisfies ApiError, { status })
 }
 
-export function badRequest(message: string, details?: Record<string, unknown>) {
-  return errorResponse('BAD_REQUEST', message, 400, details)
+export function badRequest(codeOrMessage: string, messageOrDetails?: string | Record<string, unknown>, details?: Record<string, unknown>) {
+  if (typeof messageOrDetails === 'string') {
+    return errorResponse(codeOrMessage, messageOrDetails, 400, details)
+  }
+  return errorResponse('BAD_REQUEST', codeOrMessage, 400, messageOrDetails as Record<string, unknown> | undefined)
 }
 
-export function unauthorized(message = 'Unauthorized') {
-  return errorResponse('UNAUTHORIZED', message, 401)
+export function unauthorized(message?: string, code?: string) {
+  return errorResponse(code || 'UNAUTHORIZED', message || 'Unauthorized', 401)
 }
 
-export function forbidden(message = 'Forbidden') {
-  return errorResponse('FORBIDDEN', message, 403)
+export function forbidden(message?: string, code?: string) {
+  return errorResponse(code || 'FORBIDDEN', message || 'Forbidden', 403)
 }
 
-export function notFound(message = 'Resource not found', details?: Record<string, unknown>) {
-  return errorResponse('NOT_FOUND', message, 404, details)
+export function notFound(codeOrMessage: string, messageOrDetails?: string | Record<string, unknown>, details?: Record<string, unknown>) {
+  if (typeof messageOrDetails === 'string') {
+    return errorResponse(codeOrMessage, messageOrDetails, 404, details)
+  }
+  return errorResponse('NOT_FOUND', codeOrMessage, 404, messageOrDetails as Record<string, unknown> | undefined)
 }
 
-export function conflict(message: string, details?: Record<string, unknown>) {
-  return errorResponse('CONFLICT', message, 409, details)
+export function conflict(codeOrMessage: string, messageOrDetails?: string | Record<string, unknown>, details?: Record<string, unknown>) {
+  if (typeof messageOrDetails === 'string') {
+    return errorResponse(codeOrMessage, messageOrDetails, 409, details)
+  }
+  return errorResponse('CONFLICT', codeOrMessage, 409, messageOrDetails as Record<string, unknown> | undefined)
 }
 
-export function unprocessable(message: string, details?: Record<string, unknown>) {
-  return errorResponse('UNPROCESSABLE_ENTITY', message, 422, details)
+export function unprocessable(codeOrMessage: string, messageOrDetails?: string | Record<string, unknown>, details?: Record<string, unknown>) {
+  if (typeof messageOrDetails === 'string') {
+    return errorResponse(codeOrMessage, messageOrDetails, 422, details)
+  }
+  return errorResponse('UNPROCESSABLE_ENTITY', codeOrMessage, 422, messageOrDetails as Record<string, unknown> | undefined)
 }
 
-export function internalError(message = 'Internal server error') {
-  return errorResponse('INTERNAL_ERROR', message, 500)
+export function internalError(message?: string, code?: string) {
+  return errorResponse(code || 'INTERNAL_ERROR', message || 'Internal server error', 500)
 }
 
 export function handleRouteError(err: unknown, context: string) {
   console.error(`Error ${context}:`, err)
 
   if (err instanceof InvalidTransitionError) {
-    return conflict('INVALID_TRANSITION', {
+    return conflict('INVALID_TRANSITION', 'Invalid payment state transition', {
       entity: err.entity,
       from: err.from,
       to: err.to,
@@ -53,7 +65,7 @@ export function handleRouteError(err: unknown, context: string) {
   }
 
   if (err instanceof SyntaxError) {
-    return badRequest('Invalid JSON payload')
+    return badRequest('INVALID_JSON', 'Invalid JSON payload')
   }
 
   return internalError()

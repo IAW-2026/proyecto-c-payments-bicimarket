@@ -117,5 +117,5 @@ export interface PaymentResponse {
 
 export interface MercadoPagoPreference {
   id: string
-  init_point: string
+  checkout_url: string
 }

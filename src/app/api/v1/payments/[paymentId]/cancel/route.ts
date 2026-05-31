@@ -1,5 +1,7 @@
 import { prisma } from '@/lib/prisma'
 import { validatePaymentTransition } from '@/lib/state-machines/payment'
+import { validateServiceTokenBuyer } from '@/lib/service-token'
+import { requireAdmin } from '@/lib/admin-auth'
 import { handleRouteError, notFound, conflict } from '@/lib/errors'
 
 export async function POST(
@@ -7,18 +9,24 @@ export async function POST(
   { params }: { params: Promise<{ paymentId: string }> }
 ) {
   try {
+    const svcToken = req.headers.get('X-Service-Token') || req.headers.get('x-service-token')
+    if (!validateServiceTokenBuyer(svcToken)) {
+      const adminErr = await requireAdmin()
+      if (adminErr) return adminErr
+    }
+
     const { paymentId } = await params
     const body = await req.json().catch(() => ({}))
 
     const payment = await prisma.payment.findUnique({ where: { id: paymentId } })
     if (!payment) {
-      return notFound('Payment not found', { paymentId })
+      return notFound('PAYMENT_NOT_FOUND', 'Payment not found', { paymentId })
     }
 
     try {
       validatePaymentTransition(payment.status as any, 'cancelled')
     } catch {
-      return conflict(`Cannot cancel payment in ${payment.status} status. Only pending payments can be cancelled.`, {
+      return conflict('INVALID_TRANSITION', `Cannot cancel payment in ${payment.status} status. Only pending payments can be cancelled.`, {
         current_status: payment.status,
       })
     }

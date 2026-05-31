@@ -6,7 +6,7 @@ export async function requireAdmin() {
   const userId = session?.userId
 
   if (!userId) {
-    return unauthorized('Authentication required')
+    return unauthorized('Authentication required', 'AUTH_REQUIRED')
   }
 
   const claims = session?.sessionClaims as Record<string, unknown> | undefined
@@ -22,5 +22,5 @@ export async function requireAdmin() {
     console.error('[requireAdmin] currentUser() failed:', err)
   }
 
-  return forbidden('Admin access required')
+  return forbidden('Admin access required', 'ADMIN_REQUIRED')
 }

@@ -42,7 +42,7 @@ export interface CheckoutFormProps {
     failure?: string
     pending?: string
   }
-  onPreferenceCreated?: (data: { paymentId: string; preferenceId: string; initPoint: string }) => void
+  onPreferenceCreated?: (data: { paymentId: string; preferenceId: string; checkoutUrl: string }) => void
   onError?: (error: Error) => void
   children?: React.ReactNode
 }
@@ -107,7 +107,7 @@ export function CheckoutForm({
         onPreferenceCreated?.({
           paymentId: data.data.payment_id,
           preferenceId: data.data.preference_id,
-          initPoint: data.data.init_point,
+          checkoutUrl: data.data.checkout_url,
         })
       }
     },
@@ -117,18 +117,18 @@ export function CheckoutForm({
   })
 
   const resp = mutation.data
-  const initPoint = resp?.data?.init_point
+  const checkoutUrl = resp?.data?.checkout_url
   const preferenceId = resp?.data?.preference_id
   const warning = resp?.data?.preference_warning
   const canRenderWallet = Boolean(publicKey && preferenceId)
 
   const handleRedirect = useCallback(() => {
-    if (initPoint) window.location.href = initPoint
-  }, [initPoint])
+    if (checkoutUrl) window.location.href = checkoutUrl
+  }, [checkoutUrl])
 
   const handleOpen = useCallback(() => {
-    if (initPoint) window.open(initPoint, "_blank", "noopener,noreferrer")
-  }, [initPoint])
+    if (checkoutUrl) window.open(checkoutUrl, "_blank", "noopener,noreferrer")
+  }, [checkoutUrl])
 
   const itemCount = sellerGroups?.reduce((sum, g) => sum + g.items.reduce((s, i) => s + i.quantity, 0), 0) ?? 0
 
@@ -232,7 +232,7 @@ export function CheckoutForm({
           )}
         </Button>
 
-        {initPoint && (
+        {checkoutUrl && (
           <Alert variant="default">
             <CheckCircle className="h-4 w-4 text-green-500" />
             <AlertTitle>Preferencia creada</AlertTitle>

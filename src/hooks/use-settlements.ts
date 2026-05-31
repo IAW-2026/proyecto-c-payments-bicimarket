@@ -42,7 +42,7 @@ export function useMarkSettlementsPaid() {
 
   return useMutation({
     mutationFn: async (ids: string[]) => {
-      const { data } = await axios.patch('/api/v1/settlements/mark_paid', { ids })
+      const { data } = await axios.patch('/api/v1/settlements', { ids })
       return data.data
     },
     onSuccess: () => {

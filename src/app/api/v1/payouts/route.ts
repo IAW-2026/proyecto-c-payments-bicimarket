@@ -69,23 +69,23 @@ export async function POST(req: Request) {
     const body = await req.json()
     const { settlement_id } = body
     if (!settlement_id) {
-      return badRequest('settlement_id is required')
+      return badRequest('SETTLEMENT_ID_REQUIRED', 'settlement_id is required')
     }
 
     const settlement = await prisma.settlement.findUnique({ where: { id: settlement_id } })
     if (!settlement) {
-      return notFound('Settlement not found', { settlement_id })
+      return notFound('SETTLEMENT_NOT_FOUND', 'Settlement not found', { settlement_id })
     }
 
     if (settlement.status !== 'pending') {
-      return badRequest(`Cannot create payout for settlement in ${settlement.status} state`, {
+      return badRequest('INVALID_SETTLEMENT_STATE', `Cannot create payout for settlement in ${settlement.status} state`, {
         current_status: settlement.status,
       })
     }
 
     const existingPayout = await prisma.payout.findFirst({ where: { settlement_id } })
     if (existingPayout) {
-      return badRequest('Payout already exists for this settlement', { existing_payout_id: existingPayout.id })
+      return badRequest('PAYOUT_ALREADY_EXISTS', 'Payout already exists for this settlement', { existing_payout_id: existingPayout.id })
     }
 
     const payout = await prisma.payout.create({

@@ -2,8 +2,8 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { validateServiceTokenBuyer } from '@/lib/service-token'
 import { requireAdmin } from '@/lib/admin-auth'
+import { handleRouteError, notFound } from '@/lib/errors'
 
-// GET /api/v1/payments/{paymentId} - get payment detail
 export async function GET(
   req: Request,
   { params }: { params: Promise<{ paymentId: string }> }
@@ -28,18 +28,11 @@ export async function GET(
     })
 
     if (!payment) {
-      return NextResponse.json(
-        { error: { code: 'NOT_FOUND', message: 'Payment not found' } },
-        { status: 404 }
-      )
+      return notFound('PAYMENT_NOT_FOUND', 'Payment not found', { paymentId })
     }
 
-    return NextResponse.json({ data: payment }, { status: 200 })
+    return NextResponse.json({ data: payment })
   } catch (err) {
-    console.error('Error fetching payment:', err)
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: 'Failed to fetch payment' } },
-      { status: 500 }
-    )
+    return handleRouteError(err, 'fetching payment')
   }
 }

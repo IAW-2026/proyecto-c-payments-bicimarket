@@ -164,13 +164,13 @@ export default function RefundsPage() {
           <input type="search" className="search-input" placeholder="Buscar…" value={searchQ} onChange={e => { setSearchQ(e.target.value); setPage(1) }} />
           <span style={{ flex: 1 }} />
           <span className="muted" style={{ fontSize: 12, marginRight: 4 }}>Filtros rápidos:</span>
-          <span className={`filter-chip ${dateRange === "today" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "today" ? "" : "today"); setPage(1) }}>Hoy</span>
-          <span className={`filter-chip ${dateRange === "7d" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "7d" ? "" : "7d"); setPage(1) }}>7 días</span>
-          <span className={`filter-chip ${dateRange === "30d" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "30d" ? "" : "30d"); setPage(1) }}>30 días</span>
-          <span className={`filter-chip ${dateRange === "90d" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "90d" ? "" : "90d"); setPage(1) }}>3 meses</span>
-          <span className={`filter-chip ${dateRange === "1y" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "1y" ? "" : "1y"); setPage(1) }}>1 año</span>
+          <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`filter-chip ${dateRange === "today" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "today" ? "" : "today"); setPage(1) }}>Hoy</span>
+          <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`filter-chip ${dateRange === "7d" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "7d" ? "" : "7d"); setPage(1) }}>7 días</span>
+          <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`filter-chip ${dateRange === "30d" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "30d" ? "" : "30d"); setPage(1) }}>30 días</span>
+          <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`filter-chip ${dateRange === "90d" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "90d" ? "" : "90d"); setPage(1) }}>3 meses</span>
+          <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`filter-chip ${dateRange === "1y" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "1y" ? "" : "1y"); setPage(1) }}>1 año</span>
           {(statusFilter || reasonFilter || dateRange || searchQ) && (
-            <span className="filter-chip" style={{ color: "var(--destructive)", borderColor: "transparent" }} onClick={() => { setStatusFilter(""); setReasonFilter(""); setDateRange(""); setSearchQ(""); setPage(1) }}>
+            <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className="filter-chip" style={{ color: "var(--destructive)", borderColor: "transparent" }} onClick={() => { setStatusFilter(""); setReasonFilter(""); setDateRange(""); setSearchQ(""); setPage(1) }}>
               Limpiar filtros
             </span>
           )}
@@ -182,17 +182,17 @@ export default function RefundsPage() {
               <thead>
                 <tr>
                   <th className="checkbox-cell">
-                    <span className={`cb ${selected.size > 0 ? (selected.size === refunds.length ? "checked" : "indeterminate") : ""}`} onClick={selectAll}>
+                    <span role="checkbox" aria-checked={selected.size > 0 ? (selected.size === refunds.length ? true : "mixed") : false} tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`cb ${selected.size > 0 ? (selected.size === refunds.length ? "checked" : "indeterminate") : ""}`} onClick={selectAll}>
                       {selected.size === refunds.length ? <Icons.Check /> : selected.size > 0 ? <Icons.Minus /> : null}
                     </span>
                   </th>
                   <th>ID</th>
                   <th>Pago</th>
-                  <th className="num"><span className="sort-h" onClick={() => handleSort("amount")}>Monto {sortIcon("amount")}</span></th>
+                  <th className="num"><span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className="sort-h" onClick={() => handleSort("amount")}>Monto {sortIcon("amount")}</span></th>
                   <th>Tipo</th>
                   <th>Motivo</th>
                   <th>Estado</th>
-                  <th><span className="sort-h" onClick={() => handleSort("date")}>Creado {sortIcon("date")}</span></th>
+                  <th><span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className="sort-h" onClick={() => handleSort("date")}>Creado {sortIcon("date")}</span></th>
                   <th className="actions-cell"></th>
                 </tr>
               </thead>
@@ -216,7 +216,7 @@ export default function RefundsPage() {
                     return (
                       <tr key={r.id} className={selected.has(r.id) ? "row-selected" : ""} onClick={() => router.push(`/admin/refunds/${r.id}`)} style={{ cursor: "pointer" }}>
                         <td className="checkbox-cell" onClick={e => e.stopPropagation()}>
-                          <span className={`cb ${selected.has(r.id) ? "checked" : ""}`} onClick={() => toggleSelect(r.id)}>
+                          <span role="checkbox" aria-checked={selected.has(r.id)} tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`cb ${selected.has(r.id) ? "checked" : ""}`} onClick={() => toggleSelect(r.id)}>
                             {selected.has(r.id) ? <Icons.Check /> : null}
                           </span>
                         </td>
@@ -227,7 +227,7 @@ export default function RefundsPage() {
                         <td><span className="badge badge-soft-primary">{reasonLabels[r.reason]}</span></td>
                         <td><span className={`badge ${r.status}`}><span className="dot" />{{ pending: "pendiente", approved: "aprobado", failed: "fallido" }[r.status] ?? r.status}</span></td>
                         <td className="muted mono" style={{ fontSize: 12 }}>{formatDate(r.created_at)}</td>
-                        <td className="actions-cell" onClick={e => e.stopPropagation()}><span className="icon-btn" onClick={() => handleCopy(r.id)} title="Copiar ID"><Icons.Copy /></span></td>
+                        <td className="actions-cell" onClick={e => e.stopPropagation()}><span className="icon-btn" onClick={() => handleCopy(r.id)} aria-label="Copiar ID" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} title="Copiar ID"><Icons.Copy /></span></td>
                       </tr>
                     )
                   })

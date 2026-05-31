@@ -116,7 +116,7 @@ export default function PaymentDetailPage() {
           <div className="col gap-3">
             <div className="row gap-2" style={{ flexWrap: "wrap" }}>
               <span className="mono" style={{ fontSize: 13, fontWeight: 500 }}>{d.id}</span>
-              <span className="icon-btn" onClick={() => handleCopy(d.id)} title="Copiar ID"><Icons.Copy /></span>
+              <span className="icon-btn" onClick={() => handleCopy(d.id)} aria-label="Copiar ID" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} title="Copiar ID"><Icons.Copy /></span>
               <span className={`badge ${d.status} badge-lg`}><span className="dot" />{paymentStatusLabels[d.status] ?? d.status}</span>
             </div>
             <h1 className="page-title" style={{ fontSize: 30, margin: 0 }}>{ARS(d.amount_cents)}</h1>
@@ -170,9 +170,9 @@ export default function PaymentDetailPage() {
 
         <div className="page-body-scroll" style={{ paddingTop: 16 }}>
           <div className="tabs" style={{ marginBottom: 20 }}>
-            <div className={`tab ${activeTab === "overview" ? "active" : ""}`} onClick={() => setActiveTab("overview")}>Resumen</div>
-            <div className={`tab ${activeTab === "settlements" ? "active" : ""}`} onClick={() => setActiveTab("settlements")}>Liquidaciones<span className="ct">{stats.settlements}</span></div>
-            <div className={`tab ${activeTab === "refunds" ? "active" : ""}`} onClick={() => setActiveTab("refunds")}>Reembolsos<span className="ct">{stats.refunds}</span></div>
+            <div role="tab" tabIndex={0} aria-selected={activeTab === "overview"} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`tab ${activeTab === "overview" ? "active" : ""}`} onClick={() => setActiveTab("overview")}>Resumen</div>
+            <div role="tab" tabIndex={0} aria-selected={activeTab === "settlements"} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`tab ${activeTab === "settlements" ? "active" : ""}`} onClick={() => setActiveTab("settlements")}>Liquidaciones<span className="ct">{stats.settlements}</span></div>
+            <div role="tab" tabIndex={0} aria-selected={activeTab === "refunds"} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`tab ${activeTab === "refunds" ? "active" : ""}`} onClick={() => setActiveTab("refunds")}>Reembolsos<span className="ct">{stats.refunds}</span></div>
           </div>
           {activeTab !== "overview" && (
             <div className="card" style={{ marginBottom: 16 }}>

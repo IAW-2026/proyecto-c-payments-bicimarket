@@ -140,13 +140,13 @@ export default function AdminDashboardPage() {
 
       <div className="filterbar">
         <span style={{ flex: 1 }} />
-        <span className={`filter-chip ${dateRange === "today" ? "active" : ""}`} onClick={() => setDateRange(dateRange === "today" ? "" : "today")}>Hoy</span>
-        <span className={`filter-chip ${dateRange === "7d" ? "active" : ""}`} onClick={() => setDateRange(dateRange === "7d" ? "" : "7d")}>7 días</span>
-        <span className={`filter-chip ${dateRange === "30d" ? "active" : ""}`} onClick={() => setDateRange(dateRange === "30d" ? "" : "30d")}>30 días</span>
-        <span className={`filter-chip ${dateRange === "90d" ? "active" : ""}`} onClick={() => setDateRange(dateRange === "90d" ? "" : "90d")}>3 meses</span>
-        <span className={`filter-chip ${dateRange === "1y" ? "active" : ""}`} onClick={() => setDateRange(dateRange === "1y" ? "" : "1y")}>1 año</span>
+        <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`filter-chip ${dateRange === "today" ? "active" : ""}`} onClick={() => setDateRange(dateRange === "today" ? "" : "today")}>Hoy</span>
+        <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`filter-chip ${dateRange === "7d" ? "active" : ""}`} onClick={() => setDateRange(dateRange === "7d" ? "" : "7d")}>7 días</span>
+        <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`filter-chip ${dateRange === "30d" ? "active" : ""}`} onClick={() => setDateRange(dateRange === "30d" ? "" : "30d")}>30 días</span>
+        <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`filter-chip ${dateRange === "90d" ? "active" : ""}`} onClick={() => setDateRange(dateRange === "90d" ? "" : "90d")}>3 meses</span>
+        <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`filter-chip ${dateRange === "1y" ? "active" : ""}`} onClick={() => setDateRange(dateRange === "1y" ? "" : "1y")}>1 año</span>
         {dateRange && (
-          <span className="filter-chip" style={{ color: "var(--destructive)", borderColor: "transparent" }} onClick={() => setDateRange("")}>
+          <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className="filter-chip" style={{ color: "var(--destructive)", borderColor: "transparent" }} onClick={() => setDateRange("")}>
             Limpiar filtros
           </span>
         )}

@@ -61,7 +61,7 @@ export const Icons = {
 
 export function Glyph({ size = 18 }: { size?: number }) {
   return (
-    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <svg viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-label="BiciMarket" role="img">
       <circle cx="6" cy="17" r="3.2" />
       <circle cx="18" cy="17" r="3.2" />
       <path d="M6 17 11 7h3l3 6h-7" />

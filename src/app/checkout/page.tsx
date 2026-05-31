@@ -7,7 +7,6 @@ import { AlertCircle, CheckCircle, ExternalLink, Loader2, ShoppingCart, XCircle,
 import { initMercadoPago, Wallet } from '@mercadopago/sdk-react'
 
 export default function CheckoutPage() {
-  const [email, setEmail] = useState("test_user_123@testuser.com")
   const [amount, setAmount] = useState("500.00")
   const mpInitializedRef = useRef(false)
 
@@ -28,7 +27,7 @@ export default function CheckoutPage() {
         order_id: orderId,
         buyer_profile_id: "buyer_demo",
         buyer_clerk_user_id: "user_demo",
-        buyer_email: email,
+        buyer_email: "test_user_123@testuser.com",
         amount_cents: amountCents,
         currency: "ARS",
         return_urls: {
@@ -51,16 +50,16 @@ export default function CheckoutPage() {
   })
 
   const resp = mutation.data
-  const initPoint = resp?.data?.init_point
+  const checkoutUrl = resp?.data?.checkout_url
   const preferenceId = resp?.data?.preference_id
 
   const handleRedirect = useCallback(() => {
-    if (initPoint) window.location.href = initPoint
-  }, [initPoint])
+    if (checkoutUrl) window.location.href = checkoutUrl
+  }, [checkoutUrl])
 
   const handleOpen = useCallback(() => {
-    if (initPoint) window.open(initPoint, '_blank', 'noopener,noreferrer')
-  }, [initPoint])
+    if (checkoutUrl) window.open(checkoutUrl, '_blank', 'noopener,noreferrer')
+  }, [checkoutUrl])
 
   return (
     <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
@@ -71,11 +70,6 @@ export default function CheckoutPage() {
         </div>
 
         <div className="card-body" style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <div className="field">
-            <label className="l" htmlFor="email">Email</label>
-            <input id="email" className="input" value={email} onChange={(e) => setEmail(e.target.value)} />
-          </div>
-
           <div className="field">
             <label className="l" htmlFor="amount">Amount (ARS)</label>
             <input id="amount" className="input" value={amount} onChange={(e) => setAmount(e.target.value)} />
@@ -91,7 +85,7 @@ export default function CheckoutPage() {
             </div>
           )}
 
-          {initPoint && (
+          {checkoutUrl && (
             <div className="alert success">
               <CheckCircle className="ic" size={16} />
               <div style={{ flex: 1 }}>

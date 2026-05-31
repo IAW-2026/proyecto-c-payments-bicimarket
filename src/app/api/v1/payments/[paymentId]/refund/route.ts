@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { validateServiceTokenSeller } from '@/lib/service-token'
+import { requireAdmin } from '@/lib/admin-auth'
 import { extractIdempotencyKey, findByIdempotencyKey, checkIdempotency, cacheIdempotencyResponse } from '@/lib/idempotency'
 import { notifyBuyerOrderStatus } from '@/services/inter-app-client.service'
 import mpService from '@/services/mercado-pago.service'
@@ -13,7 +14,8 @@ export async function POST(
   try {
     const svcToken = req.headers.get('X-Service-Token') || req.headers.get('x-service-token')
     if (!validateServiceTokenSeller(svcToken)) {
-      return unauthorized('Valid seller service token required')
+      const adminErr = await requireAdmin()
+      if (adminErr) return adminErr
     }
 
     const idempotencyKey = extractIdempotencyKey(req)
@@ -26,11 +28,11 @@ export async function POST(
 
     const payment = await prisma.payment.findUnique({ where: { id: paymentId } })
     if (!payment) {
-      return notFound('Payment not found', { paymentId })
+      return notFound('PAYMENT_NOT_FOUND', 'Payment not found', { paymentId })
     }
 
     if (payment.status !== 'approved') {
-      return badRequest(`Cannot refund payment in ${payment.status} state`, {
+      return badRequest('INVALID_PAYMENT_STATE', `Cannot refund payment in ${payment.status} state`, {
         current_status: payment.status,
       })
     }
@@ -39,7 +41,7 @@ export async function POST(
     const { amount_cents, reason = 'seller_rejected', seller_profile_id } = body
 
     if (!amount_cents || amount_cents <= 0 || amount_cents > payment.amount_cents) {
-      return badRequest(`Refund amount must be between 0 and ${payment.amount_cents}`, {
+      return badRequest('INVALID_REFUND_AMOUNT', `Refund amount must be between 0 and ${payment.amount_cents}`, {
         max_amount: payment.amount_cents,
       })
     }

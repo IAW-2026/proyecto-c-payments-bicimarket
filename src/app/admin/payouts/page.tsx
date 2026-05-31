@@ -124,22 +124,22 @@ export default function PayoutsPage() {
       </div>
 
       <div className="tabs" style={{ marginBottom: 16 }}>
-        <div className={`tab ${tab === "queue" ? "active" : ""}`} onClick={() => setTab("queue")}>Cola actual<span className="ct">{scheduled.length}</span></div>
-        <div className={`tab ${tab === "attention" ? "active" : ""}`} onClick={() => setTab("attention")}>Atención<span className="ct">{failed.length}</span></div>
-        <div className={`tab ${tab === "history" ? "active" : ""}`} onClick={() => setTab("history")}>Historial<span className="ct">{completed.length}</span></div>
+        <div role="tab" tabIndex={0} aria-selected={tab === "queue"} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`tab ${tab === "queue" ? "active" : ""}`} onClick={() => setTab("queue")}>Cola actual<span className="ct">{scheduled.length}</span></div>
+        <div role="tab" tabIndex={0} aria-selected={tab === "attention"} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`tab ${tab === "attention" ? "active" : ""}`} onClick={() => setTab("attention")}>Atención<span className="ct">{failed.length}</span></div>
+        <div role="tab" tabIndex={0} aria-selected={tab === "history"} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`tab ${tab === "history" ? "active" : ""}`} onClick={() => setTab("history")}>Historial<span className="ct">{completed.length}</span></div>
       </div>
 
       <div className="filterbar">
         <input type="search" className="search-input" placeholder="Buscar…" value={searchQ} onChange={e => { setSearchQ(e.target.value); setPage(1) }} />
         <span style={{ flex: 1 }} />
         <span className="muted" style={{ fontSize: 12, marginRight: 4 }}>Filtros rápidos:</span>
-        <span className={`filter-chip ${dateRange === "today" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "today" ? "" : "today"); setPage(1) }}>Hoy</span>
-        <span className={`filter-chip ${dateRange === "7d" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "7d" ? "" : "7d"); setPage(1) }}>7 días</span>
-        <span className={`filter-chip ${dateRange === "30d" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "30d" ? "" : "30d"); setPage(1) }}>30 días</span>
-        <span className={`filter-chip ${dateRange === "90d" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "90d" ? "" : "90d"); setPage(1) }}>3 meses</span>
-        <span className={`filter-chip ${dateRange === "1y" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "1y" ? "" : "1y"); setPage(1) }}>1 año</span>
+        <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`filter-chip ${dateRange === "today" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "today" ? "" : "today"); setPage(1) }}>Hoy</span>
+        <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`filter-chip ${dateRange === "7d" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "7d" ? "" : "7d"); setPage(1) }}>7 días</span>
+        <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`filter-chip ${dateRange === "30d" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "30d" ? "" : "30d"); setPage(1) }}>30 días</span>
+        <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`filter-chip ${dateRange === "90d" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "90d" ? "" : "90d"); setPage(1) }}>3 meses</span>
+        <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`filter-chip ${dateRange === "1y" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "1y" ? "" : "1y"); setPage(1) }}>1 año</span>
         {(dateRange || searchQ) && (
-          <span className="filter-chip" style={{ color: "var(--destructive)", borderColor: "transparent" }} onClick={() => { setDateRange(""); setSearchQ(""); setPage(1) }}>
+          <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className="filter-chip" style={{ color: "var(--destructive)", borderColor: "transparent" }} onClick={() => { setDateRange(""); setSearchQ(""); setPage(1) }}>
             Limpiar filtros
           </span>
         )}
@@ -154,14 +154,14 @@ export default function PayoutsPage() {
             <thead>
               <tr>
                 <th className="checkbox-cell">
-                  <span className={`cb ${selected.size > 0 ? (selected.size === displayedPayouts.length ? "checked" : "indeterminate") : ""}`} onClick={selectAll}>
+                  <span role="checkbox" aria-checked={selected.size > 0 ? (selected.size === displayedPayouts.length ? true : "mixed") : false} tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`cb ${selected.size > 0 ? (selected.size === displayedPayouts.length ? "checked" : "indeterminate") : ""}`} onClick={selectAll}>
                     {selected.size === displayedPayouts.length ? <Icons.Check /> : selected.size > 0 ? <Icons.Minus /> : null}
                   </span>
                 </th>
                 <th>ID</th>
                 <th>Liquidación</th>
                 <th>Estado</th>
-                <th className="num"><span className="sort-h" onClick={() => handleSort("amount")}>Monto {sortIcon("amount")}</span></th>
+                <th className="num"><span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className="sort-h" onClick={() => handleSort("amount")}>Monto {sortIcon("amount")}</span></th>
                 <th className="actions-cell"></th>
               </tr>
             </thead>
@@ -180,7 +180,7 @@ export default function PayoutsPage() {
                   sortedPayouts.map((p) => (
                   <tr key={p.id} className={selected.has(p.id) ? "row-selected" : ""} onClick={() => router.push(`/admin/payouts/${p.id}`)} style={{ cursor: "pointer" }}>
                     <td className="checkbox-cell" onClick={e => e.stopPropagation()}>
-                      <span className={`cb ${selected.has(p.id) ? "checked" : ""}`} onClick={() => toggleSelect(p.id)}>
+                      <span role="checkbox" aria-checked={selected.has(p.id)} tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`cb ${selected.has(p.id) ? "checked" : ""}`} onClick={() => toggleSelect(p.id)}>
                         {selected.has(p.id) ? <Icons.Check /> : null}
                       </span>
                     </td>
@@ -188,7 +188,7 @@ export default function PayoutsPage() {
                     <td className="id">{p.settlement_id.slice(0, 14)}…</td>
                     <td><span className={`badge ${p.status}`}><span className="dot" />{{ pending: "pendiente", in_progress: "en curso", completed: "completado", failed: "fallido", manual_review: "revisión manual" }[p.status] ?? p.status}</span></td>
                     <td className="num tnum" style={{ fontWeight: 500 }}>{ARS(p.settlement?.gross_amount_cents ?? 0)}</td>
-                    <td className="actions-cell" onClick={e => e.stopPropagation()}><span className="icon-btn" onClick={() => handleCopy(p.id)} title="Copiar ID"><Icons.Copy /></span></td>
+                    <td className="actions-cell" onClick={e => e.stopPropagation()}><span className="icon-btn" onClick={() => handleCopy(p.id)} aria-label="Copiar ID" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} title="Copiar ID"><Icons.Copy /></span></td>
                   </tr>
                 ))
               )}

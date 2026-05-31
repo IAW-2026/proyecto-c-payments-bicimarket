@@ -64,7 +64,7 @@ export async function POST(req: Request) {
   try {
     const svcToken = req.headers.get('X-Service-Token') || req.headers.get('x-service-token')
     if (!svcToken || (!validateServiceTokenBuyer(svcToken))) {
-      return unauthorized('Valid service token required')
+      return unauthorized('Valid service token required', 'SERVICE_TOKEN_REQUIRED')
     }
 
     const idempotencyKey = extractIdempotencyKey(req)
@@ -77,13 +77,13 @@ export async function POST(req: Request) {
     const requiredFields = ['payment_id', 'receipt_number', 'receipt_url', 'amount_cents', 'issued_at']
     for (const field of requiredFields) {
       if (!body[field]) {
-        return badRequest(`Missing required field: ${field}`)
+        return badRequest('MISSING_REQUIRED_FIELD', `Missing required field: ${field}`)
       }
     }
 
     const payment = await prisma.payment.findUnique({ where: { id: body.payment_id } })
     if (!payment) {
-      return notFound('Payment not found', { payment_id: body.payment_id })
+      return notFound('PAYMENT_NOT_FOUND', 'Payment not found', { payment_id: body.payment_id })
     }
 
     const receipt = await prisma.receipt.create({

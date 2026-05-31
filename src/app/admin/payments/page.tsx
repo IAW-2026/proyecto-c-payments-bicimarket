@@ -126,13 +126,13 @@ export default function PaymentsPage() {
         <input type="search" className="search-input" placeholder="Buscar…" value={q} onChange={e => { setQ(e.target.value); setPage(1) }} />
         <span style={{ flex: 1 }} />
         <span className="muted" style={{ fontSize: 12, marginRight: 4 }}>Filtros rápidos:</span>
-        <span className={`filter-chip ${quickFilter === "today" ? "active" : ""}`} onClick={() => { setQuickFilter(quickFilter === "today" ? "" : "today"); setPage(1) }}>Hoy</span>
-        <span className={`filter-chip ${quickFilter === "7d" ? "active" : ""}`} onClick={() => { setQuickFilter(quickFilter === "7d" ? "" : "7d"); setPage(1) }}>7 días</span>
-        <span className={`filter-chip ${quickFilter === "30d" ? "active" : ""}`} onClick={() => { setQuickFilter(quickFilter === "30d" ? "" : "30d"); setPage(1) }}>30 días</span>
-        <span className={`filter-chip ${quickFilter === "90d" ? "active" : ""}`} onClick={() => { setQuickFilter(quickFilter === "90d" ? "" : "90d"); setPage(1) }}>3 meses</span>
-        <span className={`filter-chip ${quickFilter === "1y" ? "active" : ""}`} onClick={() => { setQuickFilter(quickFilter === "1y" ? "" : "1y"); setPage(1) }}>1 año</span>
+        <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`filter-chip ${quickFilter === "today" ? "active" : ""}`} onClick={() => { setQuickFilter(quickFilter === "today" ? "" : "today"); setPage(1) }}>Hoy</span>
+        <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`filter-chip ${quickFilter === "7d" ? "active" : ""}`} onClick={() => { setQuickFilter(quickFilter === "7d" ? "" : "7d"); setPage(1) }}>7 días</span>
+        <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`filter-chip ${quickFilter === "30d" ? "active" : ""}`} onClick={() => { setQuickFilter(quickFilter === "30d" ? "" : "30d"); setPage(1) }}>30 días</span>
+        <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`filter-chip ${quickFilter === "90d" ? "active" : ""}`} onClick={() => { setQuickFilter(quickFilter === "90d" ? "" : "90d"); setPage(1) }}>3 meses</span>
+        <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`filter-chip ${quickFilter === "1y" ? "active" : ""}`} onClick={() => { setQuickFilter(quickFilter === "1y" ? "" : "1y"); setPage(1) }}>1 año</span>
         {(statusFilter || quickFilter || q) && (
-          <span className="filter-chip" style={{ color: "var(--destructive)", borderColor: "transparent" }} onClick={clearFilters}>
+          <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className="filter-chip" style={{ color: "var(--destructive)", borderColor: "transparent" }} onClick={clearFilters}>
             Limpiar filtros
           </span>
         )}
@@ -144,16 +144,16 @@ export default function PaymentsPage() {
             <thead>
               <tr>
                 <th className="checkbox-cell">
-                  <span className={`cb ${selected.size > 0 ? (selected.size === payments.length ? "checked" : "indeterminate") : ""}`} onClick={selectAll}>
+                  <span role="checkbox" aria-checked={selected.size > 0 ? (selected.size === payments.length ? true : "mixed") : false} tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`cb ${selected.size > 0 ? (selected.size === payments.length ? "checked" : "indeterminate") : ""}`} onClick={selectAll}>
                     {selected.size === payments.length ? <Icons.Check /> : selected.size > 0 ? <Icons.Minus /> : null}
                   </span>
                 </th>
                 <th>ID</th>
                 <th>Orden</th>
-                <th className="num"><span className="sort-h" onClick={() => handleSort("amount")}>Monto {sortIcon("amount")}</span></th>
+                <th className="num"><span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className="sort-h" onClick={() => handleSort("amount")}>Monto {sortIcon("amount")}</span></th>
                 <th>Estado</th>
                 <th>Método</th>
-                <th><span className="sort-h" onClick={() => handleSort("date")}>Fecha {sortIcon("date")}</span></th>
+                <th><span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className="sort-h" onClick={() => handleSort("date")}>Fecha {sortIcon("date")}</span></th>
                 <th>Ref. MP</th>
                 <th className="actions-cell"></th>
               </tr>
@@ -173,7 +173,7 @@ export default function PaymentsPage() {
                 sortedPayments.map((p) => (
                   <tr key={p.id} className={selected.has(p.id) ? "row-selected" : ""} onClick={() => router.push(`/admin/payments/${p.id}`)} style={{ cursor: "pointer" }}>
                     <td className="checkbox-cell" onClick={e => e.stopPropagation()}>
-                      <span className={`cb ${selected.has(p.id) ? "checked" : ""}`} onClick={() => toggleSelect(p.id)}>
+                      <span role="checkbox" aria-checked={selected.has(p.id)} tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`cb ${selected.has(p.id) ? "checked" : ""}`} onClick={() => toggleSelect(p.id)}>
                         {selected.has(p.id) ? <Icons.Check /> : null}
                       </span>
                     </td>
@@ -187,7 +187,7 @@ export default function PaymentsPage() {
                     <td className="muted mono" style={{ fontSize: 12 }}>{formatDate(p.created_at)}</td>
                     <td className="id">{p.gateway_reference?.slice(0, 14) ?? <span className="muted">—</span>}…</td>
                     <td className="actions-cell" onClick={e => e.stopPropagation()}>
-                      <span className="icon-btn" onClick={() => handleCopy(p.id)} title="Copiar ID"><Icons.Copy /></span>
+                      <span className="icon-btn" onClick={() => handleCopy(p.id)} aria-label="Copiar ID" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} title="Copiar ID"><Icons.Copy /></span>
                     </td>
                   </tr>
                 ))

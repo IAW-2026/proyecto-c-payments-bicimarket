@@ -83,22 +83,22 @@ export async function POST(req: Request) {
     const { payment_id, amount_cents, reason = 'manual', seller_profile_id } = body
 
     if (!payment_id || !amount_cents || !reason) {
-      return badRequest('payment_id, amount_cents, and reason are required')
+      return badRequest('REFUND_FIELDS_REQUIRED', 'payment_id, amount_cents, and reason are required')
     }
 
     const payment = await prisma.payment.findUnique({ where: { id: payment_id } })
     if (!payment) {
-      return notFound('Payment not found', { payment_id })
+      return notFound('PAYMENT_NOT_FOUND', 'Payment not found', { payment_id })
     }
 
     if (payment.status !== 'approved') {
-      return badRequest(`Cannot refund payment in ${payment.status} state`, {
+      return badRequest('INVALID_PAYMENT_STATE', `Cannot refund payment in ${payment.status} state`, {
         current_status: payment.status,
       })
     }
 
     if (amount_cents <= 0 || amount_cents > payment.amount_cents) {
-      return badRequest(`Refund amount must be between 0 and ${payment.amount_cents}`, {
+      return badRequest('INVALID_REFUND_AMOUNT', `Refund amount must be between 0 and ${payment.amount_cents}`, {
         max_amount: payment.amount_cents,
       })
     }

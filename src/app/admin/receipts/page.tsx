@@ -115,13 +115,13 @@ export default function ReceiptsPage() {
         <input type="search" className="search-input" placeholder="Buscar…" value={searchQ} onChange={e => { setSearchQ(e.target.value); setPage(1) }} />
         <span style={{ flex: 1 }} />
         <span className="muted" style={{ fontSize: 12, marginRight: 4 }}>Filtros rápidos:</span>
-        <span className={`filter-chip ${dateRange === "today" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "today" ? "" : "today"); setPage(1) }}>Hoy</span>
-        <span className={`filter-chip ${dateRange === "7d" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "7d" ? "" : "7d"); setPage(1) }}>7 días</span>
-        <span className={`filter-chip ${dateRange === "30d" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "30d" ? "" : "30d"); setPage(1) }}>30 días</span>
-        <span className={`filter-chip ${dateRange === "90d" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "90d" ? "" : "90d"); setPage(1) }}>3 meses</span>
-        <span className={`filter-chip ${dateRange === "1y" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "1y" ? "" : "1y"); setPage(1) }}>1 año</span>
+        <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`filter-chip ${dateRange === "today" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "today" ? "" : "today"); setPage(1) }}>Hoy</span>
+        <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`filter-chip ${dateRange === "7d" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "7d" ? "" : "7d"); setPage(1) }}>7 días</span>
+        <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`filter-chip ${dateRange === "30d" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "30d" ? "" : "30d"); setPage(1) }}>30 días</span>
+        <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`filter-chip ${dateRange === "90d" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "90d" ? "" : "90d"); setPage(1) }}>3 meses</span>
+        <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`filter-chip ${dateRange === "1y" ? "active" : ""}`} onClick={() => { setDateRange(dateRange === "1y" ? "" : "1y"); setPage(1) }}>1 año</span>
         {(dateRange || searchQ) && (
-          <span className="filter-chip" style={{ color: "var(--destructive)", borderColor: "transparent" }} onClick={() => { setDateRange(""); setSearchQ(""); setPage(1) }}>
+          <span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className="filter-chip" style={{ color: "var(--destructive)", borderColor: "transparent" }} onClick={() => { setDateRange(""); setSearchQ(""); setPage(1) }}>
             Limpiar filtros
           </span>
         )}
@@ -133,14 +133,14 @@ export default function ReceiptsPage() {
             <thead>
               <tr>
                 <th className="checkbox-cell">
-                  <span className={`cb ${selected.size > 0 ? (selected.size === receipts.length ? "checked" : "indeterminate") : ""}`} onClick={selectAll}>
+                  <span role="checkbox" aria-checked={selected.size > 0 ? (selected.size === receipts.length ? true : "mixed") : false} tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`cb ${selected.size > 0 ? (selected.size === receipts.length ? "checked" : "indeterminate") : ""}`} onClick={selectAll}>
                     {selected.size === receipts.length ? <Icons.Check /> : selected.size > 0 ? <Icons.Minus /> : null}
                   </span>
                 </th>
                 <th>Comprobante</th>
                 <th>Pago</th>
-                <th className="num"><span className="sort-h" onClick={() => handleSort("amount")}>Monto {sortIcon("amount")}</span></th>
-                <th><span className="sort-h" onClick={() => handleSort("date")}>Emitido {sortIcon("date")}</span></th>
+                <th className="num"><span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className="sort-h" onClick={() => handleSort("amount")}>Monto {sortIcon("amount")}</span></th>
+                <th><span role="button" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className="sort-h" onClick={() => handleSort("date")}>Emitido {sortIcon("date")}</span></th>
                 <th className="actions-cell"></th>
               </tr>
             </thead>
@@ -165,7 +165,7 @@ export default function ReceiptsPage() {
                 sortedReceipts.map((r) => (
                   <tr key={r.id} className={selected.has(r.id) ? "row-selected" : ""} onClick={() => router.push(`/admin/receipts/${r.id}`)} style={{ cursor: "pointer" }}>
                     <td className="checkbox-cell" onClick={e => e.stopPropagation()}>
-                      <span className={`cb ${selected.has(r.id) ? "checked" : ""}`} onClick={() => toggleSelect(r.id)}>
+                      <span role="checkbox" aria-checked={selected.has(r.id)} tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} className={`cb ${selected.has(r.id) ? "checked" : ""}`} onClick={() => toggleSelect(r.id)}>
                         {selected.has(r.id) ? <Icons.Check /> : null}
                       </span>
                     </td>
@@ -179,7 +179,7 @@ export default function ReceiptsPage() {
                     <td className="num tnum">{ARS(r.amount_cents)}</td>
                     <td className="muted mono" style={{ fontSize: 12 }}>{formatDate(r.issued_at)}</td>
                     <td className="actions-cell" onClick={e => e.stopPropagation()}>
-                      <span className="icon-btn" onClick={() => handleCopy(r.id)} title="Copiar ID"><Icons.Copy /></span>
+                      <span className="icon-btn" onClick={() => handleCopy(r.id)} aria-label="Copiar ID" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} title="Copiar ID"><Icons.Copy /></span>
                     </td>
                   </tr>
                 ))

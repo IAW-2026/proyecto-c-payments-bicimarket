@@ -9,14 +9,14 @@ export async function POST(req: Request) {
   try {
     const svcToken = req.headers.get('X-Service-Token') || req.headers.get('x-service-token')
     if (!validateServiceTokenShipping(svcToken)) {
-      return unauthorized('Invalid or missing service token')
+      return unauthorized('Invalid or missing service token', 'SERVICE_TOKEN_INVALID')
     }
 
     const body = await req.json()
     const requiredFields = ['shipment_id', 'order_id', 'order_seller_group_id', 'sales_order_id', 'seller_profile_id', 'delivered_at']
     for (const field of requiredFields) {
       if (!body[field]) {
-        return badRequest(`Missing required field: ${field}`)
+        return badRequest('MISSING_REQUIRED_FIELD', `Missing required field: ${field}`)
       }
     }
 
@@ -24,7 +24,7 @@ export async function POST(req: Request) {
 
     const payment = await prisma.payment.findFirst({ where: { order_id } })
     if (!payment) {
-      return notFound('Payment not found for order', { order_id })
+      return notFound('PAYMENT_NOT_FOUND', 'Payment not found for order', { order_id })
     }
 
     const sellerAmounts = getSellerAmountFromPayment(payment, seller_profile_id)

@@ -193,7 +193,7 @@ Shipping App es mayormente reactiva. Solo consume:
 
 La Payments App **se compromete a**:
 
-- Crear pagos en Mercado Pago con un `external_reference = order_id` para trazabilidad.
+- Crear pagos en Mercado Pago con un `external_reference = payment.id` para trazabilidad.
 - Devolver `checkout_url` y `payment_id` a Buyer App en el `POST /payments`.
 - Recibir el webhook de Mercado Pago (único webhook del sistema), validar la firma de MP y actualizar estado.
 - Notificar a Buyer (cambio de pago) y a Seller (creación de sub-orden, cambio de liquidación) con `POST`/`PATCH` REST sobre HTTP.

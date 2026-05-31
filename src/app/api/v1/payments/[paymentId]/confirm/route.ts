@@ -16,12 +16,12 @@ export async function PATCH(
     const body = await req.json()
 
     if (!body?.status || !['approved', 'rejected'].includes(body.status)) {
-      return badRequest('status must be "approved" or "rejected"')
+      return badRequest('INVALID_STATUS', 'status must be "approved" or "rejected"')
     }
 
     const payment = await prisma.payment.findUnique({ where: { id: paymentId } })
     if (!payment) {
-      return notFound('Payment not found', { paymentId })
+      return notFound('PAYMENT_NOT_FOUND', 'Payment not found', { paymentId })
     }
 
     const newStatus = body.status as 'approved' | 'rejected'

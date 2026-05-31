@@ -50,7 +50,7 @@ export default function ReceiptDetailPage() {
           <div className="col gap-3">
             <div className="row gap-2" style={{ flexWrap: "wrap" }}>
               <span className="mono" style={{ fontSize: 13, fontWeight: 500 }}>{d.receipt_number}</span>
-              <span className="icon-btn" onClick={() => handleCopy(d.id)} title="Copiar ID"><Icons.Copy /></span>
+              <span className="icon-btn" onClick={() => handleCopy(d.id)} aria-label="Copiar ID" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} title="Copiar ID"><Icons.Copy /></span>
               <span className="badge approved badge-lg"><span className="dot" />emitido</span>
             </div>
             <div className="row gap-3" style={{ alignItems: "baseline", flexWrap: "wrap" }}>

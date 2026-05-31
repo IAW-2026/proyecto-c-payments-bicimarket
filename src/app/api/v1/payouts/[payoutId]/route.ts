@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin } from '@/lib/admin-auth'
+import { handleRouteError, notFound, conflict } from '@/lib/errors'
 
 export async function PATCH(
   _req: Request,
@@ -13,10 +14,10 @@ export async function PATCH(
     const { payoutId } = await params
     const payout = await prisma.payout.findUnique({ where: { id: payoutId } })
     if (!payout) {
-      return NextResponse.json({ error: { code: 'NOT_FOUND', message: 'Payout not found' } }, { status: 404 })
+      return notFound('PAYOUT_NOT_FOUND', 'Payout not found', { payoutId })
     }
     if (payout.status === 'completed') {
-      return NextResponse.json({ error: { code: 'ALREADY_PAID', message: 'Payout already marked as paid' } }, { status: 409 })
+      return conflict('ALREADY_PAID', 'Payout already marked as paid')
     }
 
     const updated = await prisma.payout.update({
@@ -35,11 +36,7 @@ export async function PATCH(
 
     return NextResponse.json({ data: updated })
   } catch (err) {
-    console.error('Error marking payout as paid:', err)
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: 'Failed to mark payout as paid' } },
-      { status: 500 },
-    )
+    return handleRouteError(err, 'marking payout as paid')
   }
 }
 
@@ -66,18 +63,11 @@ export async function GET(
     })
 
     if (!payout) {
-      return NextResponse.json(
-        { error: { code: 'NOT_FOUND', message: 'Payout not found' } },
-        { status: 404 },
-      )
+      return notFound('PAYOUT_NOT_FOUND', 'Payout not found', { payoutId })
     }
 
     return NextResponse.json({ data: payout })
   } catch (err) {
-    console.error('Error fetching payout:', err)
-    return NextResponse.json(
-      { error: { code: 'INTERNAL_ERROR', message: 'Failed to fetch payout' } },
-      { status: 500 },
-    )
+    return handleRouteError(err, 'fetching payout')
   }
 }

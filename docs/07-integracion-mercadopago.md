@@ -1,195 +1,299 @@
 # 7. Integracion de Mercado Pago en Payments
 
-> **Objetivo**: documentar como integrar Mercado Pago en este proyecto de punta a punta, usando como base la documentacion oficial de Mercado Pago y alineandola con la arquitectura actual de Payments.
+> **Objetivo**: documentar como Payments se integra con Mercado Pago (Checkout Pro), describiendo el flujo real implementado, los componentes involucrados y la trazabilidad de cada operacion.
 
-## 1. Resumen ejecutivo
+## 1. Stack tecnologico
 
-Para este proyecto, la mejor opcion es **Checkout Pro**.
+| Componente | Libreria | Version |
+|---|---|---|
+| SDK servidor (crear preferencias) | `mercadopago` | 3.0.0 |
+| SDK frontend (Wallet brick) | `@mercadopago/sdk-react` | 1.0.7 |
+| HTTP client (consultas/refunds REST) | `axios` | 1.15 |
 
-La razon es simple: este Payments App ya trabaja con un flujo centrado en backend, crea una preferencia, recibe un `init_point`, redirige al checkout y procesa el resultado por webhooks. Eso coincide con el modelo de Checkout Pro, que ofrece una experiencia prearmada y redirecciona al entorno de Mercado Pago.
+## 2. Arquitectura general
 
-## 2. Comparacion de opciones
+Payments usa **Checkout Pro** con redireccion al checkout hospedado por Mercado Pago. El backend crea la preferencia, devuelve la URL de checkout y procesa notificaciones via webhook. No se usa Checkout Bricks ni Checkout API.
 
-| Opcion | Donde se cobra | Esfuerzo | Personalizacion | Encaje para este proyecto |
-| --- | --- | --- | --- | --- |
-| Checkout Pro | En Mercado Pago | Bajo | Media/baja | **La mejor opcion** |
-| Checkout Bricks | En tu sitio | Medio | Media/alta | Buena si mas adelante se quiere una UI mas embebida |
-| Checkout API | En tu sitio | Alto | Alta | No es la mejor primera opcion para este repo |
+### Flujo completo
 
-### Por que gana Checkout Pro aqui
+```
+Buyer App → POST /api/v1/payments → Payments
+  ├─ Valida service token + Idempotency-Key
+  ├─ Crea Payment record (status: pending)
+  ├─ Crea preferencia en MP (POST /checkout/preferences)
+  ├─ Registra PaymentAttempt (audit)
+  └─ Devuelve { payment_id, checkout_url, preference_id, public_key }
 
-Mercado Pago describe Checkout Pro como una integracion predefinida, con redireccion a su entorno de pago y retorno al sitio del comercio al finalizar. Para este repo eso encaja mejor que una integracion totalmente custom porque:
+Buyer App redirige a checkout_url → Checkout Pro (MP)
+  └─ Usuario paga → MP redirige a return_url + envia webhook
 
-1. El dominio Payments ya concentra la logica sensible en el backend.
-2. El proyecto ya trabaja con `preferences`, `init_point`, `return_urls` y webhooks.
-3. La prioridad del sistema es orquestar pago, liquidacion y trazabilidad, no construir una experiencia de checkout hiperpersonalizada.
-4. La complejidad de Checkout API no aporta una ventaja clara para el alcance actual.
+POST /webhooks/mercadopago ← MP
+  ├─ Valida x-signature (HMAC-SHA256 + timestamp freshness)
+  ├─ Persiste MpWebhookEvent (dedup)
+  ├─ GET /v1/payments/{id} (consulta estado real)
+  ├─ Reconoce Payment por external_reference / preference_id
+  ├─ Crea PaymentAttempt (audit)
+  ├─ Actualiza Payment (status, gateway_reference, method, card_last4)
+  ├─ Si approved → crea Receipt
+  └─ Marca MpWebhookEvent como processed
 
-Bricks queda como alternativa valida si en el futuro se quiere insertar una experiencia de cobro mas integrada en la UI. Checkout API solo tiene sentido si se necesita control total del formulario y del flujo de pago, aceptando mas trabajo de integracion y mantenimiento.
-
-## 3. Flujo recomendado para este proyecto
-
-1. Buyer App calcula el total de la orden y llama a Payments.
-2. Payments crea la preferencia en Mercado Pago.
-3. Mercado Pago devuelve `init_point` y `preference_id`.
-4. El frontend redirige al checkout de Mercado Pago.
-5. Mercado Pago notifica el cambio de estado por webhook.
-6. Payments valida la firma, consulta el pago y actualiza el estado interno.
-7. Luego Payments sigue con el flujo de liquidacion y notificaciones internas entre apps.
-
-## 4. Paso a paso de integracion
-
-### Paso 1. Crear la aplicacion en Mercado Pago
-
-Crear una aplicacion desde **Your integrations** en el panel de Mercado Pago. Esa aplicacion es la que agrupa credenciales, webhooks y configuraciones de prueba/produccion.
-
-Documentacion oficial:
-
-- [Checkout Pro - create application](https://www.mercadopago.com/developers/en/docs/checkout-pro/create-application)
-- [Checkout Pro - development environment](https://www.mercadopago.com/developers/en/docs/checkout-pro/development-environment)
-
-### Paso 2. Obtener credenciales de prueba y produccion
-
-La integracion web necesita al menos:
-
-- `public key` para el frontend.
-- `access token` para el backend.
-
-En desarrollo, Mercado Pago recomienda usar credenciales de prueba. En produccion, cambiar a las credenciales productivas de la misma aplicacion.
-
-### Paso 3. Configurar variables de entorno del proyecto
-
-Este repo ya contempla el modo sandbox/live desde variables de entorno. La documentacion interna del proyecto y el servicio de Mercado Pago usan estas variables:
-
-```bash
-NEXT_PUBLIC_MERCADOPAGO_PUBLIC_KEY=...
-MERCADOPAGO_ACCESS_TOKEN=...
-MERCADOPAGO_SANDBOX_PUBLIC_KEY=...
-MERCADOPAGO_SANDBOX_ACCESS_TOKEN=...
-MERCADOPAGO_SANDBOX_MODE=true
+Shipping App → POST /api/v1/internal/shipment-delivered
+  └─ Crea Settlement por seller (gross, 10% fee, net → pending)
 ```
 
-Regla practica:
+## 3. Variables de entorno
 
-- En frontend solo va la public key.
-- En backend solo va el access token.
-- `MERCADOPAGO_SANDBOX_MODE=true` fuerza el uso de credenciales de prueba.
+### Credenciales MP
 
-### Paso 4. Inicializar el SDK en el frontend
+```
+# Modo sandbox/testing
+MERCADOPAGO_SANDBOX_MODE=true
+MERCADOPAGO_SANDBOX_ACCESS_TOKEN=TEST-...
+MERCADOPAGO_SANDBOX_PUBLIC_KEY=TEST-...
 
-Mercado Pago indica que el entorno web debe inicializarse con su SDK oficial usando la public key del entorno correspondiente.
+# Produccion
+MERCADOPAGO_ACCESS_TOKEN=APP_USR-...
+MERCADOPAGO_PUBLIC_KEY=APP_USR-...
 
-En este proyecto eso ya se refleja en el checkout de prueba, que inicializa el SDK en el navegador y habilita el boton de redireccion o el `Wallet` Brick como acceso auxiliar.
+# Expuesta al frontend (NEXT_PUBLIC_)
+NEXT_PUBLIC_MERCADOPAGO_PUBLIC_KEY=TEST-... (o APP_USR-...)
+```
 
-Documentacion oficial:
+### Logica de seleccion (`src/services/mercado-pago.service.ts:4-14`)
 
-- [Checkout Pro - configure development environment](https://www.mercadopago.com/developers/en/docs/checkout-pro/development-environment)
-- [MercadoPago.js SDK](https://www.mercadopago.com/developers/en/docs/checkout-pro/development-environment#bookmark_include_the_mercadopagojs_library)
+Cuando `MERCADOPAGO_SANDBOX_MODE=true` se usan las credenciales `SANDBOX_*`. Si la SANDBOX no esta configurada, cae a la credencial de produccion como fallback. En produccion (`SANDBOX_MODE=false` o ausente), se usa la credencial `MERCADOPAGO_ACCESS_TOKEN` con el mismo fallback inverso.
 
-### Paso 5. Crear la preferencia desde el backend
+### Webhook
 
-La app Payments debe crear una preferencia con los datos de la orden, el email del comprador y las URLs de retorno.
+```
+MERCADOPAGO_WEBHOOK_SECRET=<hmac-secret>
+MERCADOPAGO_WEBHOOK_URL=https://<app>/webhooks/mercadopago
+```
 
-En este repo el flujo actual ya hace eso desde `src/app/api/v1/payments/route.ts` y usa `src/services/mercado-pago.service.ts` para hablar con Mercado Pago.
+Validacion en `src/lib/env.ts:39-54`: al menos una credencial (sandbox o prod) debe existir.
 
-La forma conceptual de la preferencia es esta:
+## 4. Servicio MP (`src/services/mercado-pago.service.ts`)
 
-```ts
+Encapsula toda la comunicacion con Mercado Pago. Tres funciones exportadas:
+
+| Funcion | Endpoint MP | Proposito |
+|---|---|---|
+| `createPreference(preference)` | `POST /checkout/preferences` | Crea preferencia de pago via SDK `mercadopago` |
+| `fetchPaymentDetails(paymentId)` | `GET /v1/payments/{id}` | Consulta estado real del pago (via axios directo) |
+| `createRefund(paymentId, amountCents?)` | `POST /v1/payments/{id}/refunds` | Procesa reembolso parcial o total (via axios directo) |
+| `getPublicKey()` | — | Retorna la public key segun modo sandbox/prod |
+
+Se usa axios directo para `fetchPaymentDetails` y `createRefund` en vez del SDK para evitar comportamientos inconsistentes entre versiones. Timeout configurado a 10s.
+
+## 5. Creacion de pago (`src/app/api/v1/payments/route.ts:POST`)
+
+### Request
+
+```http
+POST /api/v1/payments
+X-Service-Token: <buyer-to-payments-secret>
+Idempotency-Key: <uuid>
+Content-Type: application/json
+
 {
-  items,
-  payer: { email },
-  external_reference: paymentId,
-  auto_return: "approved",
-  back_urls: {
-    success,
-    failure,
-    pending,
-  },
+  "order_id": "...",
+  "buyer_profile_id": "...",
+  "buyer_clerk_user_id": "...",
+  "buyer_email": "...",
+  "amount_cents": 15000,
+  "currency": "ARS",
+  "items_summary": [
+    {
+      "seller_profile_id": "...",
+      "subtotal_cents": 10000,
+      "shipping_cost_cents": 5000,
+      "order_seller_group_id": "...",
+      "items": [
+        { "product_id": "...", "product_name_snapshot": "Producto", "unit_price_cents": 5000, "quantity": 2 }
+      ]
+    }
+  ],
+  "return_urls": {
+    "success": "https://.../checkout?result=success",
+    "failure": "https://.../checkout?result=failure",
+    "pending": "https://.../checkout?result=pending"
+  }
 }
 ```
 
-Puntos importantes:
+### Procesamiento
 
-- `external_reference` debe guardar el identificador interno del pago.
-- `back_urls` debe devolver al sitio del proyecto.
-- `auto_return` ayuda a cerrar el ciclo del checkout.
-- El total enviado a Mercado Pago debe coincidir con el total calculado por el backend.
+1. **Auth**: valida `X-Service-Token` (Buyer App) o admin Clerk JWT.
+2. **Idempotencia**: requiere `Idempotency-Key`; si ya existe, retorna respuesta cacheada.
+3. **Validacion**: Zod schema (`src/schemas/payment.ts`) — `createPaymentSchema`.
+4. **Consistencia**: si se envio `items_summary`, verifica que `sum(subtotal_cents + shipping_cost_cents) === amount_cents`.
+5. **Payment record**: crea registro en DB con `status: 'pending'`.
+6. **Preferencia MP**: construye el payload con `items` (mapeados desde `items_summary`), `payer.email`, `external_reference: payment.id`, `auto_return: 'approved'`, `back_urls`.
+7. **Audit**: registra `PaymentAttempt` con request/response payloads.
+8. **Response** (201):
 
-### Paso 6. Redirigir al checkout de Mercado Pago
+```json
+{
+  "data": {
+    "payment_id": "...",
+    "checkout_url": "https://mercadopago.com/...",
+    "preference_id": "..."
+  },
+  "public_key": "TEST-..."
+}
+```
 
-Una vez creada la preferencia, Mercado Pago devuelve `init_point` y `preference_id`.
+Si MP falla, registra `PaymentAttempt` con `status: 'rejected'` y retorna 502.
 
-Ese `init_point` es el que se usa para mandar al comprador al checkout hospedado por Mercado Pago. En este repo ya existe ese comportamiento en la UI de prueba de checkout.
+## 6. Frontend (`src/components/payments/checkout-form.tsx`)
 
-Mercado Pago lo documenta como un flujo de redireccion al entorno seguro de pago y retorno al sitio configurado.
+Componente React del lado del cliente que:
 
-### Paso 7. Configurar webhooks
+1. Inicializa el SDK con `initMercadoPago(NEXT_PUBLIC_MERCADOPAGO_PUBLIC_KEY)` (se ejecuta una vez via ref).
+2. Boton "Pagar" → mutation que llama a `POST /api/v1/payments`.
+3. Tras crear la preferencia, renderiza el Wallet brick de MP:
+   ```tsx
+   <Wallet initialization={{ preferenceId }} />
+   ```
+4. Tambien provee botones de "Ir al Checkout" (redirect) y "Abrir en nueva ventana".
+5. Muestra resumen del pedido con items agrupados por seller.
 
-Mercado Pago recomienda configurar notificaciones en la aplicacion para recibir eventos de pago y validar su origen.
+## 7. Webhook (`src/app/webhooks/mercadopago/route.ts`)
 
-Para este proyecto el evento relevante es `payment`.
+### Recepcion
 
-La configuracion debe seguir estas reglas:
+```http
+POST /webhooks/mercadopago
+x-signature: ts=1234567890,v1=abcdef123456...
+x-request-id: uuid
+Content-Type: application/json
 
-- Tener una URL de test y una URL de produccion.
-- Validar la firma que llega en `x-signature`.
-- Validar la frescura del timestamp.
-- Consultar el pago por API antes de cambiar estados internos.
-- Persistir los eventos para evitar duplicados.
+{
+  "action": "payment.updated",
+  "data": { "id": "123456789" }
+}
+```
 
-Documentacion oficial:
+### Validacion de firma (`src/lib/webhook-signature.ts`)
 
-- [Webhooks](https://www.mercadopago.com/developers/en/docs/your-integrations/notifications/webhooks)
+1. **Parsear** `x-signature`: extrae `ts` y `v1` del formato `ts=<valor>,v1=<hex64>`.
+2. **Construir manifest**: `id:{data.id};request-id:{x-request-id};ts:{ts};` (solo incluye `id:` si data.id existe, `request-id:` si x-request-id existe).
+3. **Calcular HMAC-SHA256** con `MERCADOPAGO_WEBHOOK_SECRET`.
+4. **Comparacion en tiempo constante**: `crypto.timingSafeEqual` (previene timing attacks).
+5. **Freshness**: el timestamp no debe tener mas de 300s de antiguedad (`isTimestampFresh`).
 
-### Paso 8. Validar el pago y actualizar el estado interno
+### Procesamiento
 
-Cuando llega el webhook, Payments no deberia confiar solo en el payload. La secuencia correcta es:
+1. Persiste `MpWebhookEvent` con `status: 'received'` (dedup por `mp_event_id: x-request-id`).
+2. Si firma invalida → retorna 400.
+3. Ejecuta `processMpWebhookEvent(mpEventId)` **sincronicamente** (no fire-and-forget: serverless congela la funcion tras la respuesta).
+4. Retorna 200.
 
-1. Validar la firma.
-2. Consultar el pago en Mercado Pago.
-3. Confirmar el estado final.
-4. Actualizar el estado local del pago.
-5. Disparar el resto del flujo interno del marketplace.
+### Procesador (`src/services/mp-webhook-processor.ts`)
 
-Ese enfoque coincide con el handler actual de `src/app/webhooks/mercadopago/route.ts`, que verifica la firma antes de iniciar el procesamiento asincrono.
+Secuencia defensiva (todo envuelto en try/catch, nunca lanza):
 
-### Paso 9. Probar en sandbox
+1. Busca `MpWebhookEvent` por `mp_event_id`, marca como `processing`.
+2. Extrae `data.id` del payload.
+3. Consulta estado real: `mpService.fetchPaymentDetails(dataId)` (GET /v1/payments/{id}).
+4. Enriquece payload con `mp_details`.
+5. **Reconocimiento del Payment local** (3 estrategias en orden):
+   - `external_reference` del pago MP → `payment.id`.
+   - `preference_id` en `PaymentAttempt.response_payload`.
+   - MP payment ID en `PaymentAttempt.response_payload`.
+6. Mapea estado MP a `PaymentStatus`:
+   - `approved` → `approved`
+   - `cancelled`, `cancelled_by_user`, `cancelled_by_seller` → `cancelled`
+   - `refunded`, `charged_back` → `refunded`
+   - `in_process`, `pending` → `pending`
+7. Crea `PaymentAttempt` de auditoria.
+8. Actualiza `Payment`: `gateway_reference`, `method`, `card_last4`, `status`, `approved_at`/`cancelled_at`.
+9. Crea `PaymentStatusHistory`.
+10. Si `approved`: crea `Receipt` con `amount_cents` y `receipt_url` desde MP.
+11. Marca `MpWebhookEvent` como `processed`.
 
-Mercado Pago recomienda probar con credenciales de test y usuarios de prueba antes de pasar a produccion.
+Las notificaciones inter-app (Buyer/Seller) estan comentadas.
 
-En este repo el checkout de prueba ya existe en `src/app/test/checkout/page.tsx`, por lo que sirve como punto de validacion funcional para el flujo sandbox.
+## 8. Reembolsos (`src/app/api/v1/payments/[paymentId]/refund/route.ts`)
 
-### Paso 10. Pasar a produccion
+### Request
 
-Cuando el flujo de prueba sea estable:
+```http
+POST /api/v1/payments/{paymentId}/refund
+X-Service-Token: <seller-to-payments-secret>
+Idempotency-Key: <uuid>
 
-1. Cambiar a credenciales productivas.
-2. Actualizar URLs de retorno y webhook.
-3. Desactivar cualquier modo sandbox.
-4. Verificar de nuevo la firma de webhook y la persistencia de eventos.
+{
+  "amount_cents": 15000,
+  "reason": "seller_rejected",
+  "seller_profile_id": "..."
+}
+```
 
-## 5. Mapa de implementacion en este repo
+### Reglas
 
-- `src/app/api/v1/payments/route.ts`: crea la preferencia y devuelve `init_point`.
-- `src/services/mercado-pago.service.ts`: encapsula el SDK y el acceso a la API de Mercado Pago.
-- `src/app/webhooks/mercadopago/route.ts`: recibe y valida notificaciones.
-- `src/app/test/checkout/page.tsx`: UI de prueba para verificar el flujo.
+- Solo autentica con **service token del Seller** (sin fallback admin).
+- Solo permitido si `payment.status === 'approved'`.
+- Valida que `amount_cents` sea positivo y no exceda `payment.amount_cents`.
+- Crea `Refund` record con `status: 'pending'`.
+- Llama a `mpService.createRefund(gatewayReference, amountCents)`.
+- Si MP responde `approved`:
+  - Actualiza `Refund` a `approved` con `gateway_reference`.
+  - Si el total reembolsado alcanza `payment.amount_cents`, marca Payment como `refunded`.
+  - Crea `PaymentStatusHistory`.
+- Si MP falla: `Refund.status = 'failed'`.
 
-## 6. Que NO elegir y por que
+## 9. Liquidacion a sellers (`src/app/api/v1/internal/shipment-delivered/route.ts`)
 
-### Checkout Bricks
+Endpoint interno llamado por Shipping App cuando se entrega la orden.
 
-Es una muy buena opcion si el objetivo es construir una experiencia de checkout mas integrada dentro del sitio. Sin embargo, para este proyecto no resuelve un problema real que hoy exista: el backend ya orquesta la preferencia, el retorno y la conciliacion.
+1. Autentica con service token de Shipping.
+2. Busca el `Payment` por `order_id`.
+3. Extrae del `items_summary` el grupo del seller y calcula montos:
+   - `gross = subtotal_cents + shipping_cost_cents`
+   - `fee = 10%` (via `calculateSettlementAmounts`)
+   - `net = gross - fee`
+4. Crea `Settlement` con `status: 'pending'` (no se auto-marca como pagado).
+5. Notificaciones a Seller estan comentadas.
 
-### Checkout API
+## 10. Modelo de datos (Prisma)
 
-Es la opcion mas flexible, pero tambien la mas costosa de implementar. Requiere mas control del formulario, mas responsabilidad de UI y mas superficie de integracion. Para este Payments App es mas compleja de lo necesario.
+### Modelos relacionados con MP
 
-## 7. Fuentes oficiales de Mercado Pago
+| Modelo | Rol |
+|---|---|
+| `Payment` | Fuente de verdad del estado del pago |
+| `PaymentAttempt` | Trazabilidad de cada interaccion con MP (request/response payloads) |
+| `PaymentStatusHistory` | Auditoria de cambios de estado |
+| `MpWebhookEvent` | Deduplicacion y tracking de webhooks recibidos |
+| `Receipt` | Comprobante generado cuando MP confirma pago |
+| `Settlement` | Liquidacion por seller (trigger por delivery, no por pago) |
+| `Refund` | Reembolsos (con estado y referencia MP) |
+| `IdempotencyKey` | Idempotencia en POSTs (24h TTL) |
 
-- [Checkout Pro overview](https://www.mercadopago.com/developers/en/docs/checkout-pro/overview)
-- [Checkout Pro development environment](https://www.mercadopago.com/developers/en/docs/checkout-pro/development-environment)
-- [Checkout Pro create application](https://www.mercadopago.com/developers/en/docs/checkout-pro/create-application)
-- [Checkout Bricks overview](https://www.mercadopago.com/developers/en/docs/checkout-bricks/landing)
-- [Checkout API overview](https://www.mercadopago.com/developers/en/docs/checkout-api-orders/overview)
-- [Webhooks](https://www.mercadopago.com/developers/en/docs/your-integrations/notifications/webhooks)
+### Maquina de estados (`src/lib/state-machines/payment.ts`)
+
+```
+pending ──→ approved ──→ refunded (terminal)
+    │
+    ├──→ rejected (terminal)
+    └──→ cancelled (terminal)
+```
+
+## 11. Mapa de archivos
+
+| Archivo | Proposito |
+|---|---|
+| `src/services/mercado-pago.service.ts` | SDK MP + axios calls (preference, payment details, refund) |
+| `src/app/api/v1/payments/route.ts` | POST: crear pago + preferencia. GET: listar pagos |
+| `src/app/api/v1/payments/[paymentId]/refund/route.ts` | Reembolso via MP |
+| `src/app/api/v1/payments/[paymentId]/cancel/route.ts` | Cancelacion de pago pendiente |
+| `src/app/webhooks/mercadopago/route.ts` | Recepcion y validacion de webhooks |
+| `src/services/mp-webhook-processor.ts` | Procesamiento del webhook (reconciliacion, actualizacion) |
+| `src/lib/webhook-signature.ts` | Validacion HMAC-SHA256 de firma MP |
+| `src/components/payments/checkout-form.tsx` | UI de checkout con Wallet brick de MP |
+| `src/components/payments/payment-status.tsx` | Display de resultado de pago |
+| `src/schemas/payment.ts` | Schemas Zod para validacion |
+| `src/lib/state-machines/payment.ts` | Maquina de estados de pagos |
+| `src/lib/env.ts` | Validacion de variables de entorno |
+| `prisma/schema.prisma` | Modelos de datos
