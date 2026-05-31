@@ -102,10 +102,15 @@ export async function POST(
           // }
         }
       } catch (mpErr) {
-        console.error('MP refund failed:', mpErr)
+        const mpMessage = mpErr instanceof Error ? mpErr.message : (mpErr as any)?.response?.data?.message || String(mpErr)
+        console.error('MP refund failed:', mpErr, 'Message:', mpMessage)
         await prisma.refund.update({
           where: { id: refund.id },
           data: { status: 'failed' },
+        })
+        return badRequest('MP_REFUND_FAILED', `MP refund failed: ${mpMessage}`, {
+          gateway_reference: payment.gateway_reference,
+          mp_error: mpMessage,
         })
       }
     }

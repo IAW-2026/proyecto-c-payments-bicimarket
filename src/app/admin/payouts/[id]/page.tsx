@@ -245,7 +245,7 @@ export default function PayoutDetailPage() {
       </div>
 
       <AlertDialog open={alertOpen} onOpenChange={setAlertOpen}>
-        <AlertDialogContent size="sm">
+        <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Marcar como pagado</AlertDialogTitle>
             <AlertDialogDescription>

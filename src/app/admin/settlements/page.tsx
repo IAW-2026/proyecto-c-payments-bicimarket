@@ -259,7 +259,7 @@ export default function SettlementsPage() {
       </div>
 
       <AlertDialog open={alertOpen} onOpenChange={setAlertOpen}>
-        <AlertDialogContent size="sm">
+        <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Marcar como pagados</AlertDialogTitle>
             <AlertDialogDescription>
