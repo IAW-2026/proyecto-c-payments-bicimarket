@@ -6,6 +6,18 @@ import axios from "axios"
 import { AlertCircle, CheckCircle, ExternalLink, Loader2, ShoppingCart, XCircle, Clock, Bug } from "lucide-react"
 import { initMercadoPago, Wallet } from '@mercadopago/sdk-react'
 
+/**
+ * esta pagina simula el proceso de checkout en el frontend, creando una preferencia de pago y 
+ * redirigiendo al usuario a Mercado Pago para completar la transacción.
+ * El flujo es el siguiente:
+ * 1. El usuario ingresa el monto a pagar y hace click en "Pay".
+ * 2. Se crea una preferencia de pago en el backend, que devuelve una URL de checkout.
+ * 3. El usuario es redirigido a Mercado Pago para completar el pago.
+ * 4. Luego de completar el pago, Mercado Pago redirige al usuario de vuelta a esta página con el resultado.
+ * 
+ * en la implementación final esta página no va a existir, es solo a modo de demostración
+ * y testing de mercadopago durante el desarrollo.
+ */
 export default function CheckoutPage() {
   const [amount, setAmount] = useState("500.00")
   const mpInitializedRef = useRef(false)
@@ -27,7 +39,7 @@ export default function CheckoutPage() {
         order_id: orderId,
         buyer_profile_id: "buyer_demo",
         buyer_clerk_user_id: "user_demo",
-        buyer_email: "test_user_123@testuser.com",
+        buyer_email: "test_user_5539129628521320852@testuser.com",
         amount_cents: amountCents,
         currency: "ARS",
         return_urls: {
