@@ -42,6 +42,10 @@ export async function POST(req: Request) {
     const rawId = payload?.data?.id ?? payload?.id ?? null
     let dataId: string | null = rawId != null ? String(rawId) : null
 
+    // ── DEBUG: log incoming webhook payload structure ──
+    console.log(`[MP:Webhook] action=${payload?.action} type=${payload?.type} topic=${payload?.topic} entity=${payload?.entity} live_mode=${payload?.live_mode} data.id=${rawId} isMerchantOrder=${payload?.topic === 'merchant_order' || payload?.type === 'merchant_order' || (typeof payload?.action === 'string' && payload.action.startsWith('merchant_order'))}`)
+    console.log(`[MP:Webhook] x-signature=${signatureHeader ? signatureHeader.slice(0, 30) + '...' : '(none)'} x-request-id=${xRequestId || '(none)'}`)
+
     function isMerchantOrderNotification(p: any): boolean {
       return p?.topic === 'merchant_order' || p?.type === 'merchant_order' || (typeof p?.action === 'string' && p.action.startsWith('merchant_order'))
     }

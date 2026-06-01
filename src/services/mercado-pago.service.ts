@@ -46,16 +46,28 @@ async function fetchPaymentDetailsWithToken(paymentId: string, token: string) {
  * Falls back to the other token (sandbox ↔ production) if the primary one returns 404.
  */
 export async function fetchPaymentDetails(paymentId: string, liveMode?: boolean) {
+  const sandboxToken = process.env.MERCADOPAGO_SANDBOX_ACCESS_TOKEN ? `${process.env.MERCADOPAGO_SANDBOX_ACCESS_TOKEN.slice(0, 12)}...` : '(not set)'
+  const prodToken = process.env.MERCADOPAGO_ACCESS_TOKEN ? `${process.env.MERCADOPAGO_ACCESS_TOKEN.slice(0, 12)}...` : '(not set)'
+  const isSandboxMode = process.env.MERCADOPAGO_SANDBOX_MODE === 'true'
+
+  console.log(`[MP:fetchPaymentDetails] paymentId=${paymentId} liveMode=${liveMode} isSandboxMode=${isSandboxMode} sandboxToken=${sandboxToken} prodToken=${prodToken}`)
+
   const primaryToken = liveMode !== undefined
     ? getAccessTokenForLiveMode(liveMode)
     : getAccessToken()
 
   if (!primaryToken) throw new Error('Mercado Pago access token not configured')
 
+  console.log(`[MP:fetchPaymentDetails] primaryToken prefix=${primaryToken.slice(0, 12)}...`)
+
   try {
     return await fetchPaymentDetailsWithToken(paymentId, primaryToken)
   } catch (err: any) {
-    if (err?.response?.status !== 404) throw err
+    const status = err?.response?.status
+    const mpMessage = err?.response?.data?.message || err?.message || String(err)
+    console.log(`[MP:fetchPaymentDetails] Token attempt failed: status=${status} message="${mpMessage}"`)
+
+    if (status !== 404) throw err
 
     const fallbackToken = liveMode !== undefined
       ? getAccessTokenForLiveMode(!liveMode)
@@ -63,10 +75,25 @@ export async function fetchPaymentDetails(paymentId: string, liveMode?: boolean)
         ? undefined
         : getAccessToken()
 
-    if (!fallbackToken || fallbackToken === primaryToken) throw err
+    if (!fallbackToken) {
+      console.log(`[MP:fetchPaymentDetails] No fallback token available`)
+      throw err
+    }
 
-    console.warn(`[MP] Payment ${paymentId} not found with primary token, trying fallback`)
-    return await fetchPaymentDetailsWithToken(paymentId, fallbackToken)
+    if (fallbackToken === primaryToken) {
+      console.log(`[MP:fetchPaymentDetails] Fallback token is identical to primary, skipping`)
+      throw err
+    }
+
+    console.log(`[MP:fetchPaymentDetails] Trying fallback token prefix=${fallbackToken.slice(0, 12)}... (different from primary: ${fallbackToken !== primaryToken})`)
+    try {
+      return await fetchPaymentDetailsWithToken(paymentId, fallbackToken)
+    } catch (fallbackErr: any) {
+      const fbStatus = fallbackErr?.response?.status
+      const fbMsg = fallbackErr?.response?.data?.message || fallbackErr?.message || String(fallbackErr)
+      console.log(`[MP:fetchPaymentDetails] Fallback also failed: status=${fbStatus} message="${fbMsg}"`)
+      throw fallbackErr
+    }
   }
 }
 
