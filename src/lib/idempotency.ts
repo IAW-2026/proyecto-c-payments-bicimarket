@@ -1,5 +1,4 @@
 import { prisma } from '@/lib/prisma'
-import { NextResponse } from 'next/server'
 
 export function extractIdempotencyKey(req: Request): string | undefined {
   try {
@@ -10,33 +9,18 @@ export function extractIdempotencyKey(req: Request): string | undefined {
   }
 }
 
-export async function findByIdempotencyKey(key?: string) {
-  if (!key) return null
-  return prisma.payment.findFirst({ where: { idempotency_key: key } })
+export async function findPaymentByKey(key: string) {
+  return prisma.payment.findUnique({ where: { idempotency_key: key } })
 }
 
-export async function checkIdempotency(key: string): Promise<{ cached: true; response: NextResponse } | { cached: false }> {
-  const existing = await prisma.idempotencyKey.findUnique({ where: { key } })
-  if (existing) {
-    return {
-      cached: true,
-      response: NextResponse.json(existing.response, { status: existing.status }),
-    }
-  }
-  return { cached: false }
+export async function findRefundByKey(key: string) {
+  return prisma.refund.findUnique({ where: { idempotency_key: key } })
 }
 
-export async function cacheIdempotencyResponse(
-  key: string,
-  responseBody: unknown,
-  status: number,
-): Promise<void> {
-  await prisma.idempotencyKey.create({
-    data: {
-      key,
-      response: responseBody as Record<string, unknown>,
-      status,
-      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000), // 24h TTL
-    },
-  })
+export async function findReceiptByKey(key: string) {
+  return prisma.receipt.findUnique({ where: { idempotency_key: key } })
+}
+
+export async function findPayoutByKey(key: string) {
+  return prisma.payout.findUnique({ where: { idempotency_key: key } })
 }

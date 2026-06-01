@@ -91,8 +91,10 @@ model Payment {
   method             PaymentMethod?
   card_last4         String?
   gateway_reference  String?
-  idempotency_key    String?         @unique
   items_summary      Json?          // per-seller breakdown for settlement calculation
+  idempotency_key    String?        @unique
+  checkout_url       String?        // MP checkout URL (init_point / sandbox_init_point)
+  preference_id      String?        // MP preference ID
   approved_at        DateTime?
   rejected_at        DateTime?
   cancelled_at       DateTime?
@@ -145,10 +147,11 @@ model Receipt {
   payment        Payment  @relation(fields: [payment_id], references: [id])
   receipt_number String
   receipt_url    String
-  amount_cents   Int
-  issued_at      DateTime
-  created_at     DateTime @default(now())
-  deleted_at     DateTime?
+  amount_cents     Int
+  idempotency_key  String?  @unique
+  issued_at        DateTime
+  created_at       DateTime @default(now())
+  deleted_at       DateTime?
 }
 
 model Settlement {
@@ -189,18 +192,19 @@ model SettlementStatusHistory {
 }
 
 model Payout {
-  id            String       @id @default(cuid())
-  settlement_id String
-  settlement    Settlement   @relation(fields: [settlement_id], references: [id])
-  transfer_id   String?
-  status        PayoutStatus @default(pending)
-  attempts      Int          @default(0)
-  last_error    String?
-  started_at    DateTime?
-  completed_at  DateTime?
-  created_at    DateTime     @default(now())
-  updated_at    DateTime     @updatedAt
-  deleted_at    DateTime?
+  id              String       @id @default(cuid())
+  settlement_id   String
+  settlement      Settlement   @relation(fields: [settlement_id], references: [id])
+  transfer_id     String?
+  status          PayoutStatus @default(pending)
+  attempts        Int          @default(0)
+  last_error      String?
+  idempotency_key String?      @unique
+  started_at      DateTime?
+  completed_at    DateTime?
+  created_at      DateTime     @default(now())
+  updated_at      DateTime     @updatedAt
+  deleted_at      DateTime?
 
   @@index([settlement_id])
 }
@@ -215,6 +219,7 @@ model Refund {
   reason            RefundReason @default(manual)
   status            RefundStatus @default(pending)
   gateway_reference String?
+  idempotency_key   String?      @unique
   created_at        DateTime     @default(now())
   updated_at        DateTime     @updatedAt
   deleted_at        DateTime?
@@ -235,17 +240,6 @@ model RefundStatusHistory {
   created_at  DateTime     @default(now())
 
   @@index([refund_id])
-}
-
-model IdempotencyKey {
-  id         String   @id @default(cuid())
-  key        String   @unique
-  response   Json
-  status     Int
-  created_at DateTime @default(now())
-  expires_at DateTime?
-
-  @@index([created_at])
 }
 
 model MpWebhookEvent {

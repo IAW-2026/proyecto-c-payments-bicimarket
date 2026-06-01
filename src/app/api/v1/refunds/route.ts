@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin } from '@/lib/admin-auth'
 import { handleRouteError, badRequest, notFound } from '@/lib/errors'
-import { extractIdempotencyKey, checkIdempotency, cacheIdempotencyResponse } from '@/lib/idempotency'
+import { extractIdempotencyKey, findRefundByKey } from '@/lib/idempotency'
 import { notifyBuyerOrderStatus } from '@/services/inter-app-client.service'
 import mpService from '@/services/mercado-pago.service'
 
@@ -75,8 +75,10 @@ export async function POST(req: Request) {
 
     const idempotencyKey = extractIdempotencyKey(req)
     if (idempotencyKey) {
-      const cached = await checkIdempotency(idempotencyKey)
-      if (cached.cached) return cached.response
+      const existing = await findRefundByKey(idempotencyKey)
+      if (existing) {
+        return NextResponse.json({ data: existing }, { status: 200 })
+      }
     }
 
     const body = await req.json()
@@ -111,6 +113,7 @@ export async function POST(req: Request) {
         reason: reason as any,
         seller_profile_id: seller_profile_id || null,
         status: 'pending',
+        ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
       },
       include: {
         payment: { select: { order_id: true, status: true, gateway_reference: true } },
@@ -180,12 +183,7 @@ export async function POST(req: Request) {
       include: { payment: { select: { order_id: true, status: true } } },
     })
 
-    const response = { data: finalRefund }
-    if (idempotencyKey) {
-      await cacheIdempotencyResponse(idempotencyKey, response, 201)
-    }
-
-    return NextResponse.json(response, { status: 201 })
+    return NextResponse.json({ data: finalRefund }, { status: 201 })
   } catch (err) {
     return handleRouteError(err, 'creating refund')
   }

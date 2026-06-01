@@ -399,7 +399,9 @@ Fuente de verdad de: `payment_id`, intentos, comprobantes, settlements (uno por 
 | `card_last4` | string? | |
 | `status` | enum (ver §6.5) | |
 | `gateway_reference` | string | `mp_payment_id` o `mp_preference_id` |
-| `idempotency_key` | string unique | |
+| `idempotency_key` | string unique | previene duplicados permanentemente |
+| `checkout_url` | string? | URL de MP (`init_point` / `sandbox_init_point`) |
+| `preference_id` | string? | ID de preferencia de MP |
 | `approved_at` / `rejected_at` / `cancelled_at` | timestamps? | |
 | `created_at` / `updated_at` | timestamps | |
 
@@ -425,6 +427,7 @@ Fuente de verdad de: `payment_id`, intentos, comprobantes, settlements (uno por 
 | `receipt_number` | string | |
 | `receipt_url` | string | PDF |
 | `amount_cents` | int | |
+| `idempotency_key` | string unique? | |
 | `issued_at` | timestamp | |
 
 #### `settlements`
@@ -454,6 +457,7 @@ Fuente de verdad de: `payment_id`, intentos, comprobantes, settlements (uno por 
 | `status` | enum `pending` \| `in_progress` \| `completed` \| `failed` \| `manual_review` | |
 | `attempts` | int | |
 | `last_error` | string? | |
+| `idempotency_key` | string unique? | |
 | `started_at` / `completed_at` | timestamps? | |
 
 #### `refunds`
@@ -466,6 +470,7 @@ Fuente de verdad de: `payment_id`, intentos, comprobantes, settlements (uno por 
 | `reason` | enum `seller_rejected` \| `buyer_cancelled` \| `not_delivered` \| `manual` | |
 | `status` | enum `pending` \| `approved` \| `failed` | |
 | `gateway_reference` | string? | |
+| `idempotency_key` | string unique? | |
 | `created_at` | timestamp | |
 
 #### `mp_webhook_events` (solo entrante de Mercado Pago)

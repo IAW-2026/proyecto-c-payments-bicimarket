@@ -269,7 +269,7 @@ Endpoint interno llamado por Shipping App cuando se entrega la orden.
 | `Receipt` | Comprobante generado cuando MP confirma pago |
 | `Settlement` | Liquidacion por seller (trigger por delivery, no por pago) |
 | `Refund` | Reembolsos (con estado y referencia MP) |
-| `IdempotencyKey` | Idempotencia en POSTs (24h TTL) |
+| — | Idempotencia manejada via `idempotency_key` directo en cada recurso (Payment, Refund, Receipt, Payout) — ver abajo §12 |
 
 ### Maquina de estados (`src/lib/state-machines/payment.ts`)
 
@@ -295,5 +295,22 @@ pending ──→ approved ──→ refunded (terminal)
 | `src/components/payments/payment-status.tsx` | Display de resultado de pago |
 | `src/schemas/payment.ts` | Schemas Zod para validacion |
 | `src/lib/state-machines/payment.ts` | Maquina de estados de pagos |
+| `src/lib/idempotency.ts` | Helpers de idempotencia por recurso |
 | `src/lib/env.ts` | Validacion de variables de entorno |
 | `prisma/schema.prisma` | Modelos de datos
+
+## 12. Idempotencia
+
+Las claves de idempotencia (`Idempotency-Key` header) se almacenan como columna directa en cada tabla de recurso (`Payment.idempotency_key`, `Refund.idempotency_key`, `Receipt.idempotency_key`, `Payout.idempotency_key`) en vez de una tabla separada `IdempotencyKey`.
+
+**Decisión de diseño**: En un sistema de pagos, la garantía de idempotencia debe ser **permanente**, no una ventana de 24h. Si un cliente reintenta con la misma key un día después, no debe crearse un segundo cargo, reembolso o transferencia. La restricción `@unique` en la columna del recurso garantiza esto para siempre.
+
+**Trade-off**: El cliente recibe el estado actual del recurso en lugar de la respuesta original exacta. Para mitigarlo en el caso de pagos, `Payment` incluye `checkout_url` y `preference_id` como columnas propias, permitiendo devolver la URL de MP aunque el pago se haya creado en un request anterior.
+
+| Aspecto | Tabla separada (anterior) | Columna en recurso (actual) |
+|---|---|---|
+| Duración de garantía | 24h (TTL) | Permanente |
+| Replay de respuesta | Respuesta original exacta | Estado actual del recurso |
+| Migraciones por recurso | Ninguna | Una por recurso |
+| Escrituras por request | 2 (payment) | 1 |
+| Riesgo de cache obsoleto | Sí | No |

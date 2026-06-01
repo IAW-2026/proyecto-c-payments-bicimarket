@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin } from '@/lib/admin-auth'
 import { handleRouteError, badRequest, notFound, unauthorized } from '@/lib/errors'
-import { extractIdempotencyKey, checkIdempotency, cacheIdempotencyResponse } from '@/lib/idempotency'
+import { extractIdempotencyKey, findPayoutByKey } from '@/lib/idempotency'
 
 export async function GET(req: Request) {
   try {
@@ -62,8 +62,10 @@ export async function POST(req: Request) {
 
     const idempotencyKey = extractIdempotencyKey(req)
     if (idempotencyKey) {
-      const cached = await checkIdempotency(idempotencyKey)
-      if (cached.cached) return cached.response
+      const existing = await findPayoutByKey(idempotencyKey)
+      if (existing) {
+        return NextResponse.json({ data: existing }, { status: 200 })
+      }
     }
 
     const body = await req.json()
@@ -94,15 +96,12 @@ export async function POST(req: Request) {
         status: 'in_progress',
         attempts: 0,
         started_at: new Date(),
+        ...(idempotencyKey ? { idempotency_key: idempotencyKey } : {}),
       },
     })
 
     const finalPayout = await prisma.payout.findUnique({ where: { id: payout.id } })
-    const response = { data: finalPayout }
-    if (idempotencyKey) {
-      await cacheIdempotencyResponse(idempotencyKey, response, 202)
-    }
-    return NextResponse.json(response, { status: 202 })
+    return NextResponse.json({ data: finalPayout }, { status: 202 })
   } catch (err) {
     return handleRouteError(err, 'creating payout')
   }

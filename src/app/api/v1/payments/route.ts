@@ -1,8 +1,7 @@
 import crypto from 'crypto'
 import { NextResponse } from 'next/server'
-import { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
-import { extractIdempotencyKey, findByIdempotencyKey, checkIdempotency, cacheIdempotencyResponse } from '@/lib/idempotency'
+import { extractIdempotencyKey, findPaymentByKey } from '@/lib/idempotency'
 import { validateServiceTokenBuyer } from '@/lib/service-token'
 import { requireAdmin } from '@/lib/admin-auth'
 import { handleRouteError, badRequest, errorResponse } from '@/lib/errors'
@@ -85,16 +84,17 @@ export async function POST(req: Request) {
       return badRequest('IDEMPOTENCY_KEY_REQUIRED', 'Idempotency-Key header is required')
     }
 
-    const existing = await findByIdempotencyKey(idempotencyKey)
+    const existing = await findPaymentByKey(idempotencyKey)
     if (existing) {
-      console.info(`[Payments:${requestId}] Idempotency hit (payment): ${idempotencyKey}`)
-      return NextResponse.json({ data: existing }, { status: 200 })
-    }
-
-    const idempotent = await checkIdempotency(idempotencyKey)
-    if (idempotent.cached) {
-      console.info(`[Payments:${requestId}] Idempotency hit (cache): ${idempotencyKey}`)
-      return idempotent.response
+      console.info(`[Payments:${requestId}] Idempotency hit: ${idempotencyKey}`)
+      return NextResponse.json({
+        data: {
+          payment_id: existing.id,
+          checkout_url: existing.checkout_url,
+          preference_id: existing.preference_id,
+        },
+        public_key: mpService.getPublicKey?.(),
+      }, { status: 200 })
     }
 
     const body = await req.json()
@@ -185,16 +185,18 @@ export async function POST(req: Request) {
         },
       })
 
-      const responseBody = {
-        data: { payment_id: payment.id, checkout_url: body.sandbox_init_point || body.init_point, preference_id: body.id },
+      const checkout_url = body.init_point || body.sandbox_init_point
+      const preference_id = body.id
+
+      await prisma.payment.update({
+        where: { id: payment.id },
+        data: { checkout_url, preference_id },
+      })
+
+      return NextResponse.json({
+        data: { payment_id: payment.id, checkout_url, preference_id },
         public_key: mpService.getPublicKey?.(),
-      }
-
-      if (idempotencyKey) {
-        await cacheIdempotencyResponse(idempotencyKey, responseBody, 201)
-      }
-
-      return NextResponse.json(responseBody, { status: 201 })
+      }, { status: 201 })
     } catch (mpErr) {
       console.error(`[Payments:${requestId}] Mercado Pago preference creation failed:`, mpErr)
       // record failed attempt

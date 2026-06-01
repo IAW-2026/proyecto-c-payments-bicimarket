@@ -12,7 +12,6 @@ const PREFIXES: Record<string, string> = {
   RefundStatusHistory: 'rsh',
   MpWebhookEvent: 'whe',
   OutboundCallLog: 'ocl',
-  IdempotencyKey: 'ik',
 }
 
 function shortId(): string {
