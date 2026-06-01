@@ -54,7 +54,8 @@ export async function processMpWebhookEvent(mpEventId: string) {
 
     let mpDetails: any = null
     try {
-      mpDetails = await mpService.fetchPaymentDetails(dataId)
+      const liveMode = payload?.live_mode !== undefined ? Boolean(payload.live_mode) : undefined
+      mpDetails = await mpService.fetchPaymentDetails(dataId, liveMode)
     } catch (innerErr: any) {
       const errMsg = innerErr?.message || String(innerErr)
       const is404 = innerErr?.response?.status === 404

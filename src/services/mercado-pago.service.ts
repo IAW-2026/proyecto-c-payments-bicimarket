@@ -7,6 +7,13 @@ function getAccessToken(): string | undefined {
   return process.env.MERCADOPAGO_ACCESS_TOKEN || process.env.MERCADOPAGO_SANDBOX_ACCESS_TOKEN
 }
 
+function getAccessTokenForLiveMode(liveMode: boolean): string | undefined {
+  if (liveMode === false) {
+    return process.env.MERCADOPAGO_SANDBOX_ACCESS_TOKEN || process.env.MERCADOPAGO_ACCESS_TOKEN
+  }
+  return process.env.MERCADOPAGO_ACCESS_TOKEN || process.env.MERCADOPAGO_SANDBOX_ACCESS_TOKEN
+}
+
 export function getPublicKey(): string | undefined {
   const isSandbox = process.env.MERCADOPAGO_SANDBOX_MODE === 'true'
   if (isSandbox) return process.env.MERCADOPAGO_SANDBOX_PUBLIC_KEY || process.env.MERCADOPAGO_PUBLIC_KEY
@@ -26,18 +33,41 @@ export async function createPreference(preference: Record<string, unknown>) {
   return resp
 }
 
-/**
- * Fetch payment details from Mercado Pago REST API.
- * Uses a direct HTTP call to ensure predictable behaviour across SDK versions.
- */
-export async function fetchPaymentDetails(paymentId: string) {
-  const token = getAccessToken()
-  if (!token) throw new Error('Mercado Pago access token not configured')
-
+async function fetchPaymentDetailsWithToken(paymentId: string, token: string) {
   const base = 'https://api.mercadopago.com'
   const url = `${base}/v1/payments/${encodeURIComponent(paymentId)}`
   const resp = await axios.get(url, { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 })
   return resp.data
+}
+
+/**
+ * Fetch payment details from Mercado Pago REST API.
+ * Uses a direct HTTP call to ensure predictable behaviour across SDK versions.
+ * Falls back to the other token (sandbox ↔ production) if the primary one returns 404.
+ */
+export async function fetchPaymentDetails(paymentId: string, liveMode?: boolean) {
+  const primaryToken = liveMode !== undefined
+    ? getAccessTokenForLiveMode(liveMode)
+    : getAccessToken()
+
+  if (!primaryToken) throw new Error('Mercado Pago access token not configured')
+
+  try {
+    return await fetchPaymentDetailsWithToken(paymentId, primaryToken)
+  } catch (err: any) {
+    if (err?.response?.status !== 404) throw err
+
+    const fallbackToken = liveMode !== undefined
+      ? getAccessTokenForLiveMode(!liveMode)
+      : getAccessToken() === primaryToken
+        ? undefined
+        : getAccessToken()
+
+    if (!fallbackToken || fallbackToken === primaryToken) throw err
+
+    console.warn(`[MP] Payment ${paymentId} not found with primary token, trying fallback`)
+    return await fetchPaymentDetailsWithToken(paymentId, fallbackToken)
+  }
 }
 
 export async function getMerchantOrder(orderId: string) {
