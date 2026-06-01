@@ -42,14 +42,18 @@ export async function POST(req: Request) {
     const rawId = payload?.data?.id ?? payload?.id ?? null
     let dataId: string | null = rawId != null ? String(rawId) : null
 
+    function isMerchantOrderNotification(p: any): boolean {
+      return p?.topic === 'merchant_order' || p?.type === 'merchant_order' || (typeof p?.action === 'string' && p.action.startsWith('merchant_order'))
+    }
+
     // Handle merchant_order JSON format with resource URL instead of data.id
-    if (!dataId && payload?.topic === 'merchant_order' && typeof payload?.resource === 'string') {
+    if (!dataId && isMerchantOrderNotification(payload) && typeof payload?.resource === 'string') {
       const match = payload.resource.match(/\/merchant_orders\/(\d+)/)
       if (match) dataId = match[1]
     }
 
     // Skip non-payment entities (agreement, subscription, wallet_connect, etc.)
-    if (payload?.entity && !['payment', 'merchant_order'].includes(payload.entity) && payload?.topic !== 'merchant_order') {
+    if (payload?.entity && !['payment', 'merchant_order'].includes(payload.entity) && !isMerchantOrderNotification(payload)) {
       console.info(`[MP Webhook] Skipping non-payment entity: ${payload.entity}`)
       return NextResponse.json({ ok: true })
     }
@@ -71,7 +75,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true })
     }
 
-    const isMerchantOrder = payload?.topic === 'merchant_order'
+    const isMerchantOrder = isMerchantOrderNotification(payload)
     const validation = isMerchantOrder
       ? validateMercadoPagoSignature(signatureHeader, dataId)
       : validatePaymentWebhookSignature(signatureHeader, xRequestId, dataId)
@@ -102,12 +106,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, reason: 'invalid_signature' }, { status: 400 })
     }
 
-    // ── IPN merchant_order: fetch order, process each payment ──
-    if (payload?.topic === 'merchant_order') {
+    // ── Merchant_order: fetch order, process each payment ──
+    if (isMerchantOrderNotification(payload)) {
       const { default: mpSvc } = await import('@/services/mercado-pago.service')
       let merchantOrder: any
       try {
-        merchantOrder = await mpSvc.getMerchantOrder(dataId)
+        const liveMode = payload?.live_mode !== undefined ? Boolean(payload.live_mode) : undefined
+        merchantOrder = await mpSvc.getMerchantOrder(dataId, liveMode)
       } catch (merr: any) {
         console.error('[MP Webhook] Failed fetching merchant_order', dataId, merr?.message || merr)
         return NextResponse.json({ ok: true })

@@ -70,14 +70,33 @@ export async function fetchPaymentDetails(paymentId: string, liveMode?: boolean)
   }
 }
 
-export async function getMerchantOrder(orderId: string) {
-  const token = getAccessToken()
-  if (!token) throw new Error('Mercado Pago access token not configured')
+export async function getMerchantOrder(orderId: string, liveMode?: boolean) {
+  const primaryToken = liveMode !== undefined
+    ? getAccessTokenForLiveMode(liveMode)
+    : getAccessToken()
+  if (!primaryToken) throw new Error('Mercado Pago access token not configured')
 
   const base = 'https://api.mercadopago.com'
   const url = `${base}/merchant_orders/${encodeURIComponent(orderId)}`
-  const resp = await axios.get(url, { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 })
-  return resp.data
+
+  try {
+    const resp = await axios.get(url, { headers: { Authorization: `Bearer ${primaryToken}` }, timeout: 10000 })
+    return resp.data
+  } catch (err: any) {
+    if (err?.response?.status !== 404) throw err
+
+    const fallbackToken = liveMode !== undefined
+      ? getAccessTokenForLiveMode(!liveMode)
+      : getAccessToken() === primaryToken
+        ? undefined
+        : getAccessToken()
+
+    if (!fallbackToken || fallbackToken === primaryToken) throw err
+
+    console.warn(`[MP] Merchant order ${orderId} not found with primary token, trying fallback`)
+    const resp = await axios.get(url, { headers: { Authorization: `Bearer ${fallbackToken}` }, timeout: 10000 })
+    return resp.data
+  }
 }
 
 /**
