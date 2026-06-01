@@ -12,18 +12,18 @@ export async function POST(req: Request) {
     const bodyText = await req.text()
     let payload: any = null
 
-    if (contentType.includes('application/x-www-form-urlencoded')) {
-      const params = new URLSearchParams(bodyText)
-      const topic = params.get('topic')
-      const id = params.get('id')
-      if (topic && id) {
-        payload = { topic, data: { id }, id: params.get('id') }
-      }
-    } else {
-      try {
-        payload = JSON.parse(bodyText)
-      } catch {
-        // not JSON — store raw
+    // Try JSON first — MP sends JSON even with wrong Content-Type headers
+    try {
+      payload = JSON.parse(bodyText)
+    } catch {
+      // Not JSON — try URL-encoded (IPN-style notifications)
+      if (contentType.includes('application/x-www-form-urlencoded')) {
+        const params = new URLSearchParams(bodyText)
+        const topic = params.get('topic')
+        const id = params.get('id')
+        if (topic && id) {
+          payload = { topic, data: { id }, id }
+        }
       }
     }
 
@@ -32,7 +32,7 @@ export async function POST(req: Request) {
     // Ping / test notifications without a data.id cannot be validated;
     // ack them so MP doesn't keep retrying.
     if (!dataId) {
-      console.info('[MP Webhook] Ignoring notification without data.id (ping/test)')
+      console.info(`[MP Webhook] No data.id — ignoring (ct=${contentType}, body=${bodyText.slice(0, 200)})`)
       try {
         await prisma.mpWebhookEvent.create({
           data: {
