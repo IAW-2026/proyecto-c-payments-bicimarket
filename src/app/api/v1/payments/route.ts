@@ -167,6 +167,7 @@ export async function POST(req: Request) {
       external_reference: payment.id,
       auto_return: 'approved',
       back_urls: validated.return_urls ?? undefined,
+      notification_url: process.env.MERCADOPAGO_WEBHOOK_URL,
     }
 
     try {
