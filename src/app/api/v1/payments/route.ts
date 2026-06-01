@@ -186,7 +186,7 @@ export async function POST(req: Request) {
       })
 
       const responseBody = {
-        data: { payment_id: payment.id, checkout_url: body.init_point || body.sandbox_init_point, preference_id: body.id },
+        data: { payment_id: payment.id, checkout_url: body.sandbox_init_point || body.init_point, preference_id: body.id },
         public_key: mpService.getPublicKey?.(),
       }
 
