@@ -40,6 +40,16 @@ export async function fetchPaymentDetails(paymentId: string) {
   return resp.data
 }
 
+export async function getMerchantOrder(orderId: string) {
+  const token = getAccessToken()
+  if (!token) throw new Error('Mercado Pago access token not configured')
+
+  const base = 'https://api.mercadopago.com'
+  const url = `${base}/merchant_orders/${encodeURIComponent(orderId)}`
+  const resp = await axios.get(url, { headers: { Authorization: `Bearer ${token}` }, timeout: 10000 })
+  return resp.data
+}
+
 /**
  * Process a refund via Mercado Pago API.
  * Refunds a payment partially or fully.
@@ -62,4 +72,4 @@ export async function createRefund(paymentId: string, amountCents?: number) {
   return resp.data
 }
 
-export default { createPreference, getPublicKey, fetchPaymentDetails, createRefund }
+export default { createPreference, getPublicKey, fetchPaymentDetails, createRefund, getMerchantOrder }

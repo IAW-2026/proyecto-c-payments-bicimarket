@@ -70,6 +70,38 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, reason: 'invalid_signature' }, { status: 400 })
     }
 
+    // ── IPN merchant_order: fetch order, process each payment ──
+    if (payload?.topic === 'merchant_order') {
+      const { default: mpSvc } = await import('@/services/mercado-pago.service')
+      let merchantOrder: any
+      try {
+        merchantOrder = await mpSvc.getMerchantOrder(dataId)
+      } catch (merr: any) {
+        console.error('[MP Webhook] Failed fetching merchant_order', dataId, merr?.message || merr)
+        return NextResponse.json({ ok: true })
+      }
+
+      const payments = merchantOrder?.payments ?? []
+      for (const p of payments) {
+        const paymentId = String(p.id)
+        const subEventId = `merchant_order:${paymentId}:${Date.now()}:${Math.random().toString(36).slice(2, 6)}`
+        try {
+          await prisma.mpWebhookEvent.create({
+            data: {
+              mp_event_id: subEventId,
+              event_type: 'merchant_order_payment',
+              payload: { data: { id: paymentId }, merchant_order_id: dataId, merchant_order: merchantOrder },
+              signature_valid: signatureValid,
+              status: 'received',
+            },
+          })
+        } catch {}
+        processMpWebhookEvent(subEventId).catch((e) => console.error('[MP Webhook] merchant_order sub-event error', e))
+      }
+
+      return NextResponse.json({ ok: true })
+    }
+
     try {
       await processMpWebhookEvent(mpEventId)
     } catch (procErr) {
