@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { validatePaymentWebhookSignature, validateMercadoPagoSignature, isTimestampFresh } from '@/lib/webhook-signature'
+import { validatePaymentWebhookSignature, isTimestampFresh } from '@/lib/webhook-signature'
 import { processMpWebhookEvent } from '@/services/mp-webhook-processor'
 
 export async function POST(req: Request) {
@@ -86,10 +86,8 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true })
     }
 
-    const isMerchantOrder = isMerchantOrderNotification(payload)
-    const validation = isMerchantOrder
-      ? validateMercadoPagoSignature(signatureHeader, dataId)
-      : validatePaymentWebhookSignature(signatureHeader, xRequestId, dataId)
+    // Webhook-style (?source_news=webhooks) always signs with id + request-id + ts
+    const validation = validatePaymentWebhookSignature(signatureHeader, xRequestId, dataId)
     const signatureValid = signatureHeader
       ? (validation.valid && (validation.ts ? isTimestampFresh(validation.ts) : false))
       : false
