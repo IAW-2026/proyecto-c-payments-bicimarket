@@ -7,13 +7,6 @@ function getAccessToken(): string | undefined {
   return process.env.MERCADOPAGO_ACCESS_TOKEN || process.env.MERCADOPAGO_SANDBOX_ACCESS_TOKEN
 }
 
-function getAccessTokenForLiveMode(liveMode: boolean): string | undefined {
-  if (liveMode === false) {
-    return process.env.MERCADOPAGO_SANDBOX_ACCESS_TOKEN || process.env.MERCADOPAGO_ACCESS_TOKEN
-  }
-  return process.env.MERCADOPAGO_ACCESS_TOKEN || process.env.MERCADOPAGO_SANDBOX_ACCESS_TOKEN
-}
-
 export function getPublicKey(): string | undefined {
   const isSandbox = process.env.MERCADOPAGO_SANDBOX_MODE === 'true'
   if (isSandbox) return process.env.MERCADOPAGO_SANDBOX_PUBLIC_KEY || process.env.MERCADOPAGO_PUBLIC_KEY
@@ -40,25 +33,34 @@ async function fetchPaymentDetailsWithToken(paymentId: string, token: string) {
   return resp.data
 }
 
+function getPrimaryToken(): string | undefined {
+  return getAccessToken()
+}
+
+function getFallbackToken(primary: string | undefined): string | undefined {
+  const isSandbox = process.env.MERCADOPAGO_SANDBOX_MODE === 'true'
+  const fb = isSandbox
+    ? process.env.MERCADOPAGO_ACCESS_TOKEN
+    : process.env.MERCADOPAGO_SANDBOX_ACCESS_TOKEN
+  return (fb && fb !== primary) ? fb : undefined
+}
+
 /**
  * Fetch payment details from Mercado Pago REST API.
  * Uses a direct HTTP call to ensure predictable behaviour across SDK versions.
  * Falls back to the other token (sandbox ↔ production) if the primary one returns 404.
  */
-export async function fetchPaymentDetails(paymentId: string, liveMode?: boolean) {
+export async function fetchPaymentDetails(paymentId: string, _liveMode?: boolean) {
   const sandboxToken = process.env.MERCADOPAGO_SANDBOX_ACCESS_TOKEN ? `${process.env.MERCADOPAGO_SANDBOX_ACCESS_TOKEN.slice(0, 12)}...` : '(not set)'
   const prodToken = process.env.MERCADOPAGO_ACCESS_TOKEN ? `${process.env.MERCADOPAGO_ACCESS_TOKEN.slice(0, 12)}...` : '(not set)'
   const isSandboxMode = process.env.MERCADOPAGO_SANDBOX_MODE === 'true'
 
-  console.log(`[MP:fetchPaymentDetails] paymentId=${paymentId} liveMode=${liveMode} isSandboxMode=${isSandboxMode} sandboxToken=${sandboxToken} prodToken=${prodToken}`)
+  const primaryToken = getPrimaryToken()
 
-  const primaryToken = liveMode !== undefined
-    ? getAccessTokenForLiveMode(liveMode)
-    : getAccessToken()
+  console.log(`[MP:fetchPaymentDetails] paymentId=${paymentId} isSandboxMode=${isSandboxMode} sandboxToken=${sandboxToken} prodToken=${prodToken}`)
+  console.log(`[MP:fetchPaymentDetails] primary prefix=${primaryToken ? primaryToken.slice(0, 12) + '...' : '(none)'}`)
 
   if (!primaryToken) throw new Error('Mercado Pago access token not configured')
-
-  console.log(`[MP:fetchPaymentDetails] primaryToken prefix=${primaryToken.slice(0, 12)}...`)
 
   try {
     return await fetchPaymentDetailsWithToken(paymentId, primaryToken)
@@ -69,23 +71,13 @@ export async function fetchPaymentDetails(paymentId: string, liveMode?: boolean)
 
     if (status !== 404) throw err
 
-    const fallbackToken = liveMode !== undefined
-      ? getAccessTokenForLiveMode(!liveMode)
-      : getAccessToken() === primaryToken
-        ? undefined
-        : getAccessToken()
-
+    const fallbackToken = getFallbackToken(primaryToken)
     if (!fallbackToken) {
-      console.log(`[MP:fetchPaymentDetails] No fallback token available`)
+      console.log(`[MP:fetchPaymentDetails] No fallback token available (different from primary)`)
       throw err
     }
 
-    if (fallbackToken === primaryToken) {
-      console.log(`[MP:fetchPaymentDetails] Fallback token is identical to primary, skipping`)
-      throw err
-    }
-
-    console.log(`[MP:fetchPaymentDetails] Trying fallback token prefix=${fallbackToken.slice(0, 12)}... (different from primary: ${fallbackToken !== primaryToken})`)
+    console.log(`[MP:fetchPaymentDetails] Trying fallback prefix=${fallbackToken.slice(0, 12)}...`)
     try {
       return await fetchPaymentDetailsWithToken(paymentId, fallbackToken)
     } catch (fallbackErr: any) {
@@ -97,10 +89,12 @@ export async function fetchPaymentDetails(paymentId: string, liveMode?: boolean)
   }
 }
 
-export async function getMerchantOrder(orderId: string, liveMode?: boolean) {
-  const primaryToken = liveMode !== undefined
-    ? getAccessTokenForLiveMode(liveMode)
-    : getAccessToken()
+export async function getMerchantOrder(orderId: string, _liveMode?: boolean) {
+  const primaryToken = getPrimaryToken()
+  const isSandboxMode = process.env.MERCADOPAGO_SANDBOX_MODE === 'true'
+
+  console.log(`[MP:getMerchantOrder] orderId=${orderId} isSandboxMode=${isSandboxMode} primary=${primaryToken ? primaryToken.slice(0, 12) + '...' : '(none)'}`)
+
   if (!primaryToken) throw new Error('Mercado Pago access token not configured')
 
   const base = 'https://api.mercadopago.com'
@@ -110,19 +104,28 @@ export async function getMerchantOrder(orderId: string, liveMode?: boolean) {
     const resp = await axios.get(url, { headers: { Authorization: `Bearer ${primaryToken}` }, timeout: 10000 })
     return resp.data
   } catch (err: any) {
-    if (err?.response?.status !== 404) throw err
+    const status = err?.response?.status
+    const mpMessage = err?.response?.data?.message || err?.message || String(err)
+    console.log(`[MP:getMerchantOrder] Token attempt failed: status=${status} message="${mpMessage}"`)
 
-    const fallbackToken = liveMode !== undefined
-      ? getAccessTokenForLiveMode(!liveMode)
-      : getAccessToken() === primaryToken
-        ? undefined
-        : getAccessToken()
+    if (status !== 404) throw err
 
-    if (!fallbackToken || fallbackToken === primaryToken) throw err
+    const fallbackToken = getFallbackToken(primaryToken)
+    if (!fallbackToken) {
+      console.log(`[MP:getMerchantOrder] No fallback token available`)
+      throw err
+    }
 
-    console.warn(`[MP] Merchant order ${orderId} not found with primary token, trying fallback`)
-    const resp = await axios.get(url, { headers: { Authorization: `Bearer ${fallbackToken}` }, timeout: 10000 })
-    return resp.data
+    console.log(`[MP:getMerchantOrder] Trying fallback prefix=${fallbackToken.slice(0, 12)}...`)
+    try {
+      const resp = await axios.get(url, { headers: { Authorization: `Bearer ${fallbackToken}` }, timeout: 10000 })
+      return resp.data
+    } catch (fallbackErr: any) {
+      const fbStatus = fallbackErr?.response?.status
+      const fbMsg = fallbackErr?.response?.data?.message || fallbackErr?.message || String(fallbackErr)
+      console.log(`[MP:getMerchantOrder] Fallback also failed: status=${fbStatus} message="${fbMsg}"`)
+      throw fallbackErr
+    }
   }
 }
 

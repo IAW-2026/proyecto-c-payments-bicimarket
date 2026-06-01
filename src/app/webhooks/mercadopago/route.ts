@@ -43,11 +43,18 @@ export async function POST(req: Request) {
     let dataId: string | null = rawId != null ? String(rawId) : null
 
     // ── DEBUG: log incoming webhook payload structure ──
-    console.log(`[MP:Webhook] action=${payload?.action} type=${payload?.type} topic=${payload?.topic} entity=${payload?.entity} live_mode=${payload?.live_mode} data.id=${rawId} isMerchantOrder=${payload?.topic === 'merchant_order' || payload?.type === 'merchant_order' || (typeof payload?.action === 'string' && payload.action.startsWith('merchant_order'))}`)
+    console.log(`[MP:Webhook] action=${payload?.action} type=${payload?.type} topic=${payload?.topic} entity=${payload?.entity} live_mode=${payload?.live_mode} data.id=${rawId}`)
     console.log(`[MP:Webhook] x-signature=${signatureHeader ? signatureHeader.slice(0, 30) + '...' : '(none)'} x-request-id=${xRequestId || '(none)'}`)
 
     function isMerchantOrderNotification(p: any): boolean {
-      return p?.topic === 'merchant_order' || p?.type === 'merchant_order' || (typeof p?.action === 'string' && p.action.startsWith('merchant_order'))
+      const t = (p?.type || '').toString().toLowerCase()
+      const a = (p?.action || '').toString().toLowerCase()
+      return p?.topic === 'merchant_order'
+        || t === 'merchant_order'
+        || t === 'topic_merchant_order_wh'
+        || t === 'merchant_order_wh'
+        || t.includes('merchant_order')
+        || a.startsWith('merchant_order')
     }
 
     // Handle merchant_order JSON format with resource URL instead of data.id
@@ -115,8 +122,7 @@ export async function POST(req: Request) {
       const { default: mpSvc } = await import('@/services/mercado-pago.service')
       let merchantOrder: any
       try {
-        const liveMode = payload?.live_mode !== undefined ? Boolean(payload.live_mode) : undefined
-        merchantOrder = await mpSvc.getMerchantOrder(dataId, liveMode)
+        merchantOrder = await mpSvc.getMerchantOrder(dataId)
       } catch (merr: any) {
         console.error('[MP Webhook] Failed fetching merchant_order', dataId, merr?.message || merr)
         return NextResponse.json({ ok: true })

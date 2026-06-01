@@ -54,9 +54,8 @@ export async function processMpWebhookEvent(mpEventId: string) {
 
     let mpDetails: any = null
     try {
-      const liveMode = payload?.live_mode !== undefined ? Boolean(payload.live_mode) : undefined
-      console.log(`[MP Processor] Fetching payment details: dataId=${dataId} liveMode=${liveMode} payload.action=${payload?.action} payload.type=${payload?.type} payload.topic=${payload?.topic}`)
-      mpDetails = await mpService.fetchPaymentDetails(dataId, liveMode)
+      console.log(`[MP Processor] Fetching payment details: dataId=${dataId} payload.action=${payload?.action} payload.type=${payload?.type} payload.topic=${payload?.topic}`)
+      mpDetails = await mpService.fetchPaymentDetails(dataId)
     } catch (innerErr: any) {
       const errMsg = innerErr?.message || String(innerErr)
       const is404 = innerErr?.response?.status === 404
