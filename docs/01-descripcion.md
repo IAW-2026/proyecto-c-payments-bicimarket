@@ -275,3 +275,17 @@ Las máquinas de estado completas viven en `06-estados.md`. Versión corta:
 - **`payment.status`** (Payments): `pending → approved → rejected → refunded`. Estados terminales no se reabren.
 - **`settlement.status`** (Payments): `pending → paid → failed → manual_review`.
 
+---
+
+## 7. Apéndice: diferencias con `old-docs/` (Payments App)
+
+Este apéndice documenta los cambios entre `old-docs/01-descripcion.md` y la versión actual del documento que impactan exclusivamente a **Payments App**. El contenido de otras apps no se analiza.
+
+### 7.1 Flujo de liquidación (§4.4)
+
+| Aspecto | old-docs | actual | Por qué en Payments |
+|---------|----------|--------|---------------------|
+| Transferencia MP | `P->>MP: POST /v1/transfers (uno por seller)` → `MP-->>P: transfer_id` | **No implementado**. Payments no llama a `POST /v1/transfers`. El settlement queda `pending` y admin lo marca como pagado manualmente. | Las transfers de MP requieren `collector_id` de cada seller y no están en el alcance académico. Se reemplazó por acción admin: `PATCH /api/v1/settlements` marca settlements como `paid`. |
+| Settlement | Se crea automáticamente con transfer | Se crea al recibir `shipment-delivered` desde Shipping, queda `pending` | La liquidación se gatilla por entrega, no por pago. Como no hay transfer automática, el admin debe marcarla manualmente. |
+| Notificación Seller | `P-->>S: PATCH /api/v1/sales-orders/{id}/payment-status (settled)` | Comentada | Idem notificaciones inter-app deshabilitadas. |
+

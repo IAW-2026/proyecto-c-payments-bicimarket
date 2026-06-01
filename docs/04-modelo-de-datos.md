@@ -10,7 +10,7 @@
 
 - **Motor**: PostgreSQL 16+, una instancia por app (ideal: bases separadas en clusters separados; mínimo aceptable: bases separadas en el mismo cluster con usuarios distintos).
 - **ORM**: Prisma.
-- **IDs**: `String @id @default(cuid())` con prefijo de recurso (`ord_`, `prd_`, etc.) generado en aplicación.
+- **IDs**: `String @id @default(cuid())` en schema, sobrescrito via extensión de Prisma (`$extends`) que genera IDs con prefijo de recurso (`pay_`, `set_`, `pyt_`, `ref_`, `rec_`, etc.) en cada `create`. Ver `src/lib/id-generator.ts` y `src/lib/prisma.ts`.
 - **Timestamps**: `created_at @default(now())` y `updated_at @updatedAt` en toda tabla.
 - **Soft deletes**: `deleted_at DateTime?` en entidades con historial relevante (productos, perfiles).
 - **Snapshots**: cuando un campo viene de otra app (precio, dirección, nombre del producto), se guarda con sufijo `_snapshot` y **nunca se actualiza** una vez guardado.
@@ -399,6 +399,7 @@ Fuente de verdad de: `payment_id`, intentos, comprobantes, settlements (uno por 
 | `card_last4` | string? | |
 | `status` | enum (ver §6.5) | |
 | `gateway_reference` | string | `mp_payment_id` o `mp_preference_id` |
+| `items_summary` | json? | desglose por vendedor: `[{ seller_profile_id, subtotal_cents, shipping_cost_cents, order_seller_group_id, items[] }]`, usado al llegar `shipment-delivered` para calcular settlements |
 | `idempotency_key` | string unique | previene duplicados permanentemente |
 | `checkout_url` | string? | URL de MP (`init_point` / `sandbox_init_point`) |
 | `preference_id` | string? | ID de preferencia de MP |
@@ -571,3 +572,65 @@ pending ─► paid (terminal)
 | Comisión y net del settlement | Payments (verdad) | **Payments App** | Seller solo lee. |
 
 ---
+
+## Apéndice: diferencias con `old-docs/` (Payments App)
+
+### A. Reglas comunes (§0) — IDs
+
+| old-docs | actual | Por qué en Payments |
+|----------|--------|---------------------|
+| `String @id @default(cuid())` con prefijo generado en aplicación | `String @id @default(cuid())` sobrescrito vía extensión de Prisma (`$extends`) que llama a `generateId(model)` de `src/lib/id-generator.ts` | El middleware `$extends` en `src/lib/prisma.ts` intercepta cada `create` y reemplaza el `id` generado por `cuid()` con un ID prefijado (`pay_`, `set_`, etc.). Esto garantiza IDs legibles estilo Stripe sin depender del `@default` del schema. El `@default(cuid())` queda como fallback por si la extensión no se ejecuta. |
+
+### B. Payments App (§4) — Tabla `payments`
+
+| Campo | old-docs | actual | Por qué en Payments |
+|-------|----------|--------|---------------------|
+| `checkout_url` | No existía | `string?` — URL de MP (`init_point`) | Se guarda post-creación de preferencia para devolver al frontend en respuestas de idempotencia. |
+| `preference_id` | No existía | `string?` — ID de preferencia de MP | Necesario para renderizar Wallet Brick en el frontend. |
+| `items_summary` | No existía | `json?` — `[{ seller_profile_id, subtotal_cents, shipping_cost_cents, order_seller_group_id, items[] }]` | Se persiste el payload completo del request para usarlo al calcular settlements cuando llega `shipment-delivered`. Sin `items_summary` no sabríamos cómo desglosar el pago por seller. |
+| `idempotency_key` | `string unique` (sí existía) | `string unique` | Sin cambios. La key se guarda en el Payment para idempotencia permanente. |
+| `method` | `enum?` | `enum` (mismo) | Sin cambios — se llena post-aprobación desde webhook. |
+| `card_last4` | No existía | `string?` | Se llena post-aprobación desde respuesta de MP (últimos 4 dígitos). |
+
+### C. Payments App (§4) — Nuevas tablas de auditoría
+
+| Tabla | old-docs | actual | Por qué en Payments |
+|-------|----------|--------|---------------------|
+| `PaymentStatusHistory` | No existía | Modelo completo con `from_status`, `to_status`, `source`, `payload`, `occurred_at` | Auditoría de cambios de estado requerida para trazabilidad. Consistente con el resto del sistema (ver §0: "cualquier cambio de estado relevante deja registro en `*_status_history`"). |
+| `SettlementStatusHistory` | No existía | Idem | Idem. |
+| `RefundStatusHistory` | No existía | Idem | Idem. |
+
+### D. Payments App (§4) — Tablas modificadas
+
+#### `receipts`
+
+| Campo | old-docs | actual | Por qué en Payments |
+|-------|----------|--------|---------------------|
+| `idempotency_key` | No existía | `string unique?` | Idempotencia permanente en creación de comprobantes. |
+
+#### `refunds`
+
+| Campo | old-docs | actual | Por qué en Payments |
+|-------|----------|--------|---------------------|
+| `idempotency_key` | No existía | `string unique?` | Idempotencia permanente en reembolsos. |
+
+#### `payouts`
+
+| Campo | old-docs | actual | Por qué en Payments |
+|-------|----------|--------|---------------------|
+| `idempotency_key` | No existía | `string unique?` | Idempotencia permanente en transferencias. |
+
+#### `settlements`
+
+| old-docs | actual | Por qué en Payments |
+|----------|--------|---------------------|
+| Sin relación a `payouts` | `payouts Payout[]` — un settlement puede tener múltiples intentos de payout | Trazabilidad: si un payout falla y se reintenta, todos los intentos quedan vinculados al mismo settlement. |
+
+### E. Sin cambios en Payments
+
+- `payment_attempts` — idéntico.
+- `mp_webhook_events` — idéntico.
+- `outbound_calls_log` — idéntico.
+- Diagrama ER (§4.2) — idéntico.
+- Máquinas de estado (§5.5, §5.6) — idénticas.
+- Datos duplicados (§6) — idéntico, Payments no cambió su rol en la matriz.

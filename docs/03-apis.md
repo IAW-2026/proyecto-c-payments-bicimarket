@@ -1208,12 +1208,20 @@ Lo llama Buyer App al confirmar el checkout. **Auth**: Buyer token **o** admin.
     {
       "seller_profile_id": "slp_01H…",
       "subtotal_cents": 65000000,
-      "shipping_cost_cents": 1200000
+      "shipping_cost_cents": 1200000,
+      "order_seller_group_id": "osg_01H…",
+      "items": [
+        { "product_id": "prd_01H…", "product_name_snapshot": "Bicicleta Trek Marlin 5", "unit_price_cents": 65000000, "quantity": 1 }
+      ]
     },
     {
       "seller_profile_id": "slp_02H…",
       "subtotal_cents": 9000000,
-      "shipping_cost_cents": 300000
+      "shipping_cost_cents": 300000,
+      "order_seller_group_id": "osg_02H…",
+      "items": [
+        { "product_id": "prd_02H…", "product_name_snapshot": "Cubierta Continental 29\"", "unit_price_cents": 4500000, "quantity": 2 }
+      ]
     }
   ],
   "return_urls": {
@@ -1223,6 +1231,9 @@ Lo llama Buyer App al confirmar el checkout. **Auth**: Buyer token **o** admin.
   }
 }
 ```
+
+> `return_urls` es opcional. Si no se envía, MP usa sus defaults; el frontend puede igualmente renderizar el Wallet Brick sin back_urls.
+> `items_summary.items` es opcional pero recomendado para que la preferencia de MP muestre los productos correctamente.
 
 **Response 201**
 
@@ -1299,7 +1310,7 @@ Solo si `status=pending`. **Request** (opcional): `{ "reason": "Cliente canceló
 
 ### `POST /api/v1/payments/{paymentId}/refund`
 
-Reembolso desde Seller App. **Auth**: Seller token only (sin fallback admin).
+Reembolso desde Seller App o admin. **Auth**: Seller token **o** admin (con `admin=true`). El fallback admin permite al panel de Payments emitir reembolsos directos sin depender de Seller App.
 
 **Request**
 
@@ -1677,3 +1688,131 @@ MERCADOPAGO_WEBHOOK_SECRET=…
 ```
 
 ---
+
+## Apéndice: diferencias con `old-docs/` (Payments App)
+
+Este apéndice detalla los cambios entre `old-docs/03-apis.md` y la versión actual en la sección **Payments App** (P1–P8). No se analizan otras apps.
+
+### A. Estructura de Payments App
+
+| Aspecto | old-docs | actual | Por qué en Payments |
+|---------|----------|--------|---------------------|
+| Secciones | P1 (Pagos), P2 (Comprobantes), P3 (Liquidaciones), P4 (Webhook) | P1 (Pagos), P2 (Reembolsos CRUD), P3 (Comprobantes), P4 (Liquidaciones), P5 (Payouts), P6 (Webhook), P7 (Interno), P8 (Notificaciones) | Se agregaron CRUD admin completos para refunds, payouts y settlements al descubrir que la UI admin necesitaba gestión manual. |
+| Auth header | No documentaba el patrón service-token-OR-admin | Tabla explícita con fila "Los endpoints que aceptan service token O admin primero intentan validar el token; si falla, caen en verificación admin" | El código implementa este patrón en varios endpoints (refund, list payments) y necesitaba documentarse. |
+
+### B. P1 — Pagos
+
+#### B.1 `POST /api/v1/payments`
+
+| Aspecto | old-docs | actual | Por qué en Payments |
+|---------|----------|--------|---------------------|
+| Auth | No especificado explícitamente | Buyer token **o** admin | Buyer App llama con service token; admin puede crear pagos desde el panel. |
+| `buyer_email` en request | No existía | Campo `buyer_email` opcional | Se pasa a MP como `payer.email` en la preferencia. No se persiste en DB. |
+| `items_summary[].items` | No existía | Array anidado `items: [{ product_id, product_name_snapshot, unit_price_cents, quantity }]` | Alimenta la preferencia de MP con productos reales en vez de un ítem genérico. |
+| `items_summary[].order_seller_group_id` | No existía | `order_seller_group_id` por seller | Necesario para trazar settlements hasta el grupo de la orden cuando llega `shipment-delivered`. |
+| `return_urls` | Requerido | Opcional (`z.optional()`) | Wallet Brick no requiere `back_urls`. |
+| Response envelope | Plano: `{ id, order_id, amount_cents, checkout_url, ... }` | `{ data: { payment_id, checkout_url, preference_id }, public_key }` | Consistencia con estándar de paginación (§0.4). `preference_id` + `public_key` necesarios para Wallet Brick. `payment_id` se usa en vez de `id` para claridad. |
+
+#### B.2 `GET /api/v1/payments` (listado)
+
+| old-docs | actual |
+|----------|--------|
+| No existía | `GET /api/v1/payments?orderId=...&buyerId=...&status=...&from=...&to=...&q=...&page=1&limit=20` |
+
+Por qué: necesario para dashboard admin y para que Buyer App consuma sus comprobantes.
+
+#### B.3 `GET /api/v1/payments/{paymentId}`
+
+| old-docs | actual |
+|----------|--------|
+| Response plano | Response `{ data: { ... } }` |
+
+#### B.4 `POST /api/v1/payments/{paymentId}/refund`
+
+| Aspecto | old-docs | actual | Por qué en Payments |
+|---------|----------|--------|---------------------|
+| Auth | Sin auth especificada | Seller token **o** admin (fallback) | Se agregó fallback admin porque el panel de Payments necesita poder reembolsar sin depender de Seller App para escenarios de soporte. Código: `src/app/api/v1/payments/[paymentId]/refund/route.ts:16-19`. |
+| Request body | `{ amount_cents, reason, seller_profile_id }` | Igual + `Idempotency-Key` opcional (no estaba documentado) | Idempotencia permanente vía columna `@unique` en Refund. |
+
+#### B.5 `PATCH /api/v1/payments/{paymentId}/confirm`
+
+Sin cambios entre old-docs y actual.
+
+### C. P2 — Reembolsos (CRUD admin) — NUEVA SECCIÓN
+
+| Endpoint | old-docs | actual |
+|----------|----------|--------|
+| `GET /api/v1/refunds` | No existía | Lista paginada con filtros |
+| `POST /api/v1/refunds` | No existía | Crear reembolso manual (admin) |
+| `GET /api/v1/refunds/{id}` | No existía | Detalle + status_history |
+| `PATCH /api/v1/refunds/{id}` | No existía | Actualizar estado manual |
+
+Por qué: el dashboard admin necesita crear y trackear reembolsos sin depender de Seller App. Los refunds antes solo existían como sub-recurso de payment (`POST /payments/{id}/refund`).
+
+### D. P3 — Comprobantes
+
+| Endpoint | old-docs | actual | Por qué en Payments |
+|----------|----------|--------|---------------------|
+| `GET /api/v1/receipts/{id}` | Sí, response plano | Response `{ data: { ... } }` | Consistencia. |
+| `GET /api/v1/receipts` | No existía | Lista paginada con `?paymentId=X` | Buyer App necesita listar comprobantes. |
+| `POST /api/v1/receipts` | No existía | Crear comprobante (Buyer token only) | Buyer App genera el comprobante tras pago aprobado. |
+
+### E. P4 — Liquidaciones (settlements)
+
+| Endpoint | old-docs | actual | Por qué en Payments |
+|----------|----------|--------|---------------------|
+| `POST /api/v1/settlements` (interno, documentado por simetría) | Sí | **Eliminado** | El settlement se crea automáticamente al recibir `POST /api/v1/internal/shipment-delivered`. No hay endpoint público POST para settlements. |
+| `GET /api/v1/settlements/{id}` | Response plano | Response `{ data: { ... } }` | Consistencia. |
+| `GET /api/v1/settlements?sellerId=X` | Sin paginación estándar | Con paginación estándar `{ data: [...], pagination: { ... } }` | Consistencia. |
+| `PATCH /api/v1/settlements` (batch mark paid) | No existía | Marcar uno o varios settlements como `paid` | Reemplaza el flujo de `POST /v1/transfers` de MP. Admin marca manualmente. |
+| Incluye `payouts` | No | Cada settlement incluye `payouts` asociados | Trazabilidad de intentos de transferencia. |
+
+### F. P5 — Payouts (CRUD admin) — NUEVA SECCIÓN
+
+| Endpoint | old-docs | actual |
+|----------|----------|--------|
+| `GET /api/v1/payouts` | No existía | Lista paginada con filtros |
+| `POST /api/v1/payouts` | `POST /api/v1/payouts` existía (dentro de P3) | Igual, ahora en sección propia |
+| `GET /api/v1/payouts/{id}` | No existía | Detalle con settlement asociado |
+| `PATCH /api/v1/payouts/{id}` | No existía | Marcar como completado |
+
+### G. P6 — Webhook MP
+
+| old-docs | actual |
+|----------|--------|
+| Response `{ "received": true }` | Response `{ "ok": true }` |
+
+Cambio menor de naming, sin impacto funcional.
+
+### H. P7 — Interno (`shipment-delivered`)
+
+Sin cambios entre old-docs y actual.
+
+### J. Integración MP (final del doc)
+
+| Endpoint MP | old-docs | actual | Por qué en Payments |
+|-------------|----------|--------|---------------------|
+| `POST /v1/payments` | Sí | **Eliminado** | No se usa — Payments usa Checkout Pro vía `/checkout/preferences`. |
+| `POST /v1/transfers` | Sí | **Eliminado** | No implementado. Settlements se pagan manualmente. |
+| `GET /v1/transfers/{id}` | Sí | **Eliminado** | No implementado. |
+
+### K. Endpoints renombrados (otras apps, afectan cómo Payments consume)
+
+| old-docs | actual | Afecta a Payments |
+|----------|--------|-------------------|
+| `GET /api/v1/buyer-profile/me` | `GET /api/v1/buyer/profile` | Payments no consume este endpoint directamente. |
+| `PUT /api/v1/buyer-profile/me` | `PATCH /api/v1/buyer/profile` | Payments no consume. |
+| `GET /api/v1/addresses` | `GET /api/v1/buyer/addresses` | Payments no consume. |
+| `POST /api/v1/cart/items` | `POST /api/v1/buyer/cart` | Payments no consume. |
+| `POST /api/v1/orders` | `POST /api/v1/buyer/checkout` | Payments no consume. |
+| `PATCH /api/v1/orders/{id}/status` (server-to-server) | `PATCH /api/v1/orders/{id}` (cambia de path pero mismo rol) | Payments llama a este endpoint — sin cambio funcional. |
+| `PUT /api/v1/addresses/{id}` | `PATCH /api/v1/buyer/addresses/{id}` | Payments no consume. |
+| `PATCH /api/v1/cart/items/{id}` | `PATCH /api/v1/buyer/cart/{id}` | Payments no consume. |
+| `GET /api/v1/favorites` | `GET /api/v1/buyer/favorites` | Payments no consume. |
+
+### L. Sin cambios en Payments
+
+- `POST /api/v1/payments/{paymentId}/cancel` — idéntico contenido. 
+- `POST /api/v1/internal/shipment-delivered` — idéntico.
+- Mapa de notificaciones inter-app — idéntico.
+- Secretos y service tokens — idéntico.

@@ -1,5 +1,7 @@
 # 7. Integracion de Mercado Pago en Payments
 
+> **Archivo nuevo — no existía en `old-docs/`**. Se creó porque el nivel de detalle de la integración real (SDK, Wallet Brick, webhook processor, state machine, idempotencia, mapa de archivos) excedía lo que cabía en `03-apis.md`. Las secciones §3, §7, §11 y §12 son las que más valor agregaron respecto al esquema previo.
+
 > **Objetivo**: documentar como Payments se integra con Mercado Pago (Checkout Pro), describiendo el flujo real implementado, los componentes involucrados y la trazabilidad de cada operacion.
 
 ## 1. Stack tecnologico
@@ -12,7 +14,7 @@
 
 ## 2. Arquitectura general
 
-Payments usa **Checkout Pro** con redireccion al checkout hospedado por Mercado Pago. El backend crea la preferencia, devuelve la URL de checkout y procesa notificaciones via webhook. No se usa Checkout Bricks ni Checkout API.
+Payments usa **Checkout Pro** con redireccion al checkout hospedado por Mercado Pago, complementado con el **Wallet Brick** de Checkout Bricks para experiencia de pago embebida. El backend crea la preferencia, devuelve la URL de checkout + preference_id, y el frontend renderiza tanto el Wallet Brick como botones de redireccion directa. Procesa notificaciones via webhook. No se usa Checkout API (solo Preferencias y Wallet Brick).
 
 ### Flujo completo
 
@@ -24,8 +26,8 @@ Buyer App → POST /api/v1/payments → Payments
   ├─ Registra PaymentAttempt (audit)
   └─ Devuelve { payment_id, checkout_url, preference_id, public_key }
 
-Buyer App redirige a checkout_url → Checkout Pro (MP)
-  └─ Usuario paga → MP redirige a return_url + envia webhook
+Buyer App renderiza Wallet Brick + redirect buttons
+  └─ Usuario paga via Wallet Brick o redireccion → MP → return_url + webhook
 
 POST /webhooks/mercadopago ← MP
   ├─ Valida x-signature (HMAC-SHA256 + timestamp freshness)
@@ -127,8 +129,9 @@ Content-Type: application/json
 2. **Idempotencia**: requiere `Idempotency-Key`; si ya existe, retorna respuesta cacheada.
 3. **Validacion**: Zod schema (`src/schemas/payment.ts`) — `createPaymentSchema`.
 4. **Consistencia**: si se envio `items_summary`, verifica que `sum(subtotal_cents + shipping_cost_cents) === amount_cents`.
-5. **Payment record**: crea registro en DB con `status: 'pending'`.
-6. **Preferencia MP**: construye el payload con `items` (mapeados desde `items_summary`), `payer.email`, `external_reference: payment.id`, `auto_return: 'approved'`, `back_urls`.
+5. **`return_urls` opcional**: si no se envian, MP usa defaults y el Wallet Brick funciona igual.
+6. **Payment record**: crea registro en DB con `status: 'pending'`.
+7. **Preferencia MP**: construye el payload con `items` (mapeados desde `items_summary`), `payer.email` (tomado del request — no se persiste en DB), `external_reference: payment.id`, `auto_return: 'approved'`, `back_urls`.
 7. **Audit**: registra `PaymentAttempt` con request/response payloads.
 8. **Response** (201):
 

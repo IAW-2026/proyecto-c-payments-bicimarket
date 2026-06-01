@@ -262,3 +262,38 @@ Todas son llamadas REST con `X-Service-Token`, salvo la última que es el webhoo
 | **Mercado Pago** _(externo, único webhook real)_ | Pago actualizado                    | Payments    | `POST`  | `/webhooks/mercadopago`                          |
 
 ---
+
+## 9. Apéndice: diferencias con `old-docs/` (Payments App)
+
+### 9.1 Payments App (§6) — cambios en compromisos
+
+| Compromiso en old-docs | Actual | Por qué en Payments |
+|------------------------|--------|---------------------|
+| `external_reference = order_id` | `external_reference = payment.id` (código: `src/app/api/v1/payments/route.ts:167`) | Usar `payment.id` permite reconocer el pago local desde el webhook de MP aunque la orden cambie. MP devuelve `external_reference` en el webhook; con `payment.id` hacemos lookup directo. |
+| `POST /v1/payments` (endpoint MP para crear pago) | Solo `POST /checkout/preferences` (SDK) | Checkout Pro vía preferencias es más simple. No necesitamos crear payments manualmente. |
+| `POST /v1/transfers` (transferir a seller) | **No implementado.** Settlement queda `pending`, admin marca como pagado | Las transfers MP no entran en el alcance académico. Se reemplazó por `PATCH /api/v1/settlements` manual. |
+| `GET /v1/transfers/{id}` | **No implementado.** No existe endpoint de consulta de transfers | No hay transfers. |
+
+### 9.2 Payments App (§6) — nuevos compromisos
+
+| Compromiso actual | old-docs | Por qué en Payments |
+|-------------------|----------|---------------------|
+| Devolver `preference_id` y `public_key` en POST /payments | No existía | Wallet Brick de MP necesita `preference_id` y `public_key` para renderizarse. |
+| `items_summary` con `items[]` y `order_seller_group_id` | Solo `{ seller_profile_id, subtotal_cents, shipping_cost_cents }` | Items anidados alimentan la preferencia de MP con productos reales. `order_seller_group_id` traza el settlement hasta el grupo de la orden. |
+| `return_urls` opcional | No documentado | Wallet Brick no requiere `back_urls`; MP autogenera defaults. |
+| Admin fallback en refund | No existía | El panel admin necesita reembolsar sin depender de Seller App (soporte). |
+| CRUD completo de refunds, payouts, settlements admin | Solo `POST /payouts` y `POST /settlements` interno | Dashboard admin necesita gestionar reembolsos y transferencias manualmente. |
+
+### 9.3 Payments App (§6.4) — endpoints MP consumidos
+
+| Endpoint MP | old-docs | actual |
+|-------------|----------|--------|
+| `POST /checkout/preferences` | Sí | Sí |
+| `GET /v1/payments/{id}` | Sí | Sí |
+| `POST /v1/payments/{id}/refunds` | Sí | Sí |
+| `POST /v1/transfers` | Sí | **Eliminado** |
+| `GET /v1/transfers/{id}` | Sí | **Eliminado** |
+
+### 9.4 Sin cambios
+
+- §1-5, §7-8: idénticos. Payments no tiene cambios en estos apartados.
