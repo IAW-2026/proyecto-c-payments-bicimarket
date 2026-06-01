@@ -44,7 +44,8 @@ export async function processMpWebhookEvent(mpEventId: string) {
     await prisma.mpWebhookEvent.update({ where: { mp_event_id: mpEventId }, data: { status: 'processing' } })
 
     const payload: any = evt.payload ?? null
-    const dataId = payload?.data?.id || payload?.id || null
+    const rawId = payload?.data?.id ?? payload?.id ?? null
+    const dataId = rawId != null ? String(rawId) : null
 
     if (!dataId) {
       await prisma.mpWebhookEvent.update({ where: { mp_event_id: mpEventId }, data: { status: 'processed', processed_at: new Date() } })
@@ -106,26 +107,25 @@ export async function processMpWebhookEvent(mpEventId: string) {
     const paymentStatus = mapMpStatusToPaymentStatus(mpStatus)
     const attemptStatus = mapMpStatusToAttemptStatus(mpStatus)
 
-    // Create an audit PaymentAttempt representing this notification
-    try {
-      let lastAttemptNumber = 0
-      if (payment) {
+    // Create an audit PaymentAttempt representing this notification (only if we matched a payment)
+    if (payment) {
+      try {
         const last = await prisma.paymentAttempt.findFirst({ where: { payment_id: payment.id }, orderBy: { created_at: 'desc' } })
-        lastAttemptNumber = last ? last.attempt_number : 0
-      }
+        const lastAttemptNumber = last ? last.attempt_number : 0
 
-      await prisma.paymentAttempt.create({
-        data: {
-          payment_id: payment ? payment.id : undefined,
-          attempt_number: lastAttemptNumber + 1,
-          provider: 'mercadopago',
-          status: attemptStatus as any,
-          request_payload: { webhook_payload: payload } as any,
-          response_payload: mpDetails as any,
-        },
-      })
-    } catch (attErr) {
-      console.error('[MP Processor] Failed creating PaymentAttempt audit', attErr)
+        await prisma.paymentAttempt.create({
+          data: {
+            payment_id: payment.id,
+            attempt_number: lastAttemptNumber + 1,
+            provider: 'mercadopago',
+            status: attemptStatus as any,
+            request_payload: { webhook_payload: payload } as any,
+            response_payload: mpDetails as any,
+          },
+        })
+      } catch (attErr) {
+        console.error('[MP Processor] Failed creating PaymentAttempt audit', attErr)
+      }
     }
 
     // Update payment record if found

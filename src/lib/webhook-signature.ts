@@ -45,7 +45,7 @@ function buildSignatureManifest(dataId: string | null, xRequestId: string | null
   let manifest = ''
 
   if (dataId) {
-    manifest += `id:${dataId.toLowerCase()};`
+    manifest += `id:${String(dataId).toLowerCase()};`
   }
   if (xRequestId && xRequestId.trim() !== '') {
     manifest += `request-id:${xRequestId};`
@@ -112,14 +112,14 @@ export function validatePaymentWebhookSignature(
 }
 
 /**
- * Validate signature for orders topic webhooks.
- * Manifest format: id:{data.id};request-id:{x-request-id};ts:{ts};
+ * Validate signature for orders/merchant_order topic webhooks.
+ * Manifest format: id:{data.id};ts:{ts};  (NO request-id)
  * Source: https://www.mercadopago.com.br/developers/en/docs/checkout-api-orders/notifications
  */
 export function validateMercadoPagoSignature(
   signatureHeader: string | null,
-  xRequestId: string | null,
   dataId: string | null,
+  tsOverride?: string,
 ): { valid: boolean; ts: string | null } {
   if (!signatureHeader) {
     console.warn('[WebhookSignature] Missing x-signature header')
@@ -138,7 +138,13 @@ export function validateMercadoPagoSignature(
     return { valid: false, ts: parsed.ts }
   }
 
-  const manifest = buildSignatureManifest(dataId, xRequestId, parsed.ts)
+  // merchant_order signature manifest: id:<data.id>;ts:<ts>;  (NO request-id)
+  let manifest = ''
+  if (dataId) {
+    manifest += `id:${String(dataId).toLowerCase()};`
+  }
+  manifest += `ts:${tsOverride || parsed.ts};`
+
   const expectedSignature = computeHmacSha256Hex(secret, manifest)
 
   if (constantTimeEqualsHex(expectedSignature, parsed.v1)) {

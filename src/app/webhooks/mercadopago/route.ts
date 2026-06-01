@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { validatePaymentWebhookSignature, isTimestampFresh } from '@/lib/webhook-signature'
+import { validatePaymentWebhookSignature, validateMercadoPagoSignature, isTimestampFresh } from '@/lib/webhook-signature'
 import { processMpWebhookEvent } from '@/services/mp-webhook-processor'
 
 export async function POST(req: Request) {
@@ -27,7 +27,20 @@ export async function POST(req: Request) {
       }
     }
 
-    let dataId: string | null = payload?.data?.id || payload?.id || null
+    // Third fallback: query params from URL (IPN via notification_url sends ?id=&topic=)
+    if (!payload || (!payload?.data?.id && !payload?.id)) {
+      try {
+        const reqUrl = new URL(req.url)
+        const urlId = reqUrl.searchParams.get('id')
+        const urlTopic = reqUrl.searchParams.get('topic')
+        if (urlId) {
+          payload = { ...(payload || {}), data: { id: urlId }, id: urlId, topic: payload?.topic || urlTopic || 'unknown' }
+        }
+      } catch { /* invalid URL */ }
+    }
+
+    const rawId = payload?.data?.id ?? payload?.id ?? null
+    let dataId: string | null = rawId != null ? String(rawId) : null
 
     // Handle merchant_order JSON format with resource URL instead of data.id
     if (!dataId && payload?.topic === 'merchant_order' && typeof payload?.resource === 'string') {
@@ -58,8 +71,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true })
     }
 
-    const validation = validatePaymentWebhookSignature(signatureHeader, xRequestId, dataId)
-    const signatureValid = validation.valid && (validation.ts ? isTimestampFresh(validation.ts) : false)
+    const isMerchantOrder = payload?.topic === 'merchant_order'
+    const validation = isMerchantOrder
+      ? validateMercadoPagoSignature(signatureHeader, dataId)
+      : validatePaymentWebhookSignature(signatureHeader, xRequestId, dataId)
+    const signatureValid = signatureHeader
+      ? (validation.valid && (validation.ts ? isTimestampFresh(validation.ts) : false))
+      : false
 
     const action = payload?.action || payload?.topic || 'unknown'
     const mpEventId = xRequestId || `${action}:${dataId}`
@@ -77,7 +95,9 @@ export async function POST(req: Request) {
       console.error('[MP Webhook] Failed to persist event:', dbErr)
     }
 
-    if (!signatureValid) {
+    // IPN notifications (no x-signature header) are processed without signature verification.
+    // Only reject when a signature WAS provided but is invalid.
+    if (signatureHeader && !signatureValid) {
       console.warn('[MP Webhook] Invalid signature for', mpEventId)
       return NextResponse.json({ ok: false, reason: 'invalid_signature' }, { status: 400 })
     }
