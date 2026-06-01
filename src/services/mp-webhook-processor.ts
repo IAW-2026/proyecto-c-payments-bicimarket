@@ -55,8 +55,14 @@ export async function processMpWebhookEvent(mpEventId: string) {
     try {
       mpDetails = await mpService.fetchPaymentDetails(dataId)
     } catch (innerErr: any) {
-      console.error('[MP Processor] Failed fetching MP details for', dataId, innerErr?.message || innerErr)
-      await prisma.mpWebhookEvent.update({ where: { mp_event_id: mpEventId }, data: { status: 'failed', last_error: String(innerErr?.message || innerErr) } })
+      const errMsg = innerErr?.message || String(innerErr)
+      const is404 = innerErr?.response?.status === 404
+      if (is404) {
+        console.warn('[MP Processor] MP payment not found for', dataId, errMsg)
+      } else {
+        console.error('[MP Processor] Failed fetching MP details for', dataId, errMsg)
+      }
+      await prisma.mpWebhookEvent.update({ where: { mp_event_id: mpEventId }, data: { status: 'failed', last_error: errMsg } })
       return
     }
 

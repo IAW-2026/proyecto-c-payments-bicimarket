@@ -27,7 +27,19 @@ export async function POST(req: Request) {
       }
     }
 
-    const dataId = payload?.data?.id || payload?.id || null
+    let dataId: string | null = payload?.data?.id || payload?.id || null
+
+    // Handle merchant_order JSON format with resource URL instead of data.id
+    if (!dataId && payload?.topic === 'merchant_order' && typeof payload?.resource === 'string') {
+      const match = payload.resource.match(/\/merchant_orders\/(\d+)/)
+      if (match) dataId = match[1]
+    }
+
+    // Skip non-payment entities (agreement, subscription, wallet_connect, etc.)
+    if (payload?.entity && !['payment', 'merchant_order'].includes(payload.entity) && payload?.topic !== 'merchant_order') {
+      console.info(`[MP Webhook] Skipping non-payment entity: ${payload.entity}`)
+      return NextResponse.json({ ok: true })
+    }
 
     // Ping / test notifications without a data.id cannot be validated;
     // ack them so MP doesn't keep retrying.
