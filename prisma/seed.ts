@@ -1,4 +1,4 @@
-import { PrismaClient } from "../src/generated/prisma/client"
+import { Prisma, PrismaClient } from "../src/generated/prisma/client"
 
 const prisma = new PrismaClient()
 
@@ -439,7 +439,7 @@ async function main() {
         path: pick(callPaths),
         request_body: { payment_id: `pay_seed_${pad(i + 1)}`, status: "approved" },
         response_status: succeeded ? 200 : null,
-        response_body: succeeded ? { ok: true } : null,
+        response_body: succeeded ? { ok: true } : Prisma.DbNull,
         attempts: succeeded ? 1 : 3,
         last_error: succeeded ? null : "Connection timeout",
         succeeded_at: succeeded ? daysAgo(i) : null,
