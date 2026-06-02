@@ -82,9 +82,9 @@ export function CheckoutForm({
         amount_cents: amountCents,
         currency,
         return_urls: returnUrls ?? {
-          success: `${origin}/checkout?result=success&payment_id={payment_id}`,
-          failure: `${origin}/checkout?result=failure&payment_id={payment_id}`,
-          pending: `${origin}/checkout?result=pending&payment_id={payment_id}`,
+          success: `${origin}/admin/checkout?result=success&payment_id={payment_id}`,
+          failure: `${origin}/admin/checkout?result=failure&payment_id={payment_id}`,
+          pending: `${origin}/admin/checkout?result=pending&payment_id={payment_id}`,
         },
         items_summary: sellerGroups?.map((g) => ({
           seller_profile_id: g.sellerProfileId,

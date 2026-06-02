@@ -11,7 +11,7 @@ import { Icons } from "@/lib/icons"
 import { ARS, formatDate } from "@/lib/currency"
 import { downloadCsv } from "@/lib/csv"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { useCreateRefund, useRefunds } from "@/hooks/use-refunds"
+import { useRefunds } from "@/hooks/use-refunds"
 import { useToast } from "@/hooks/use-toast"
 import type { RefundFilters } from "@/hooks/use-refunds"
 import type { Refund, RefundReason } from "@/types/payments"
@@ -32,10 +32,6 @@ export default function RefundsPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [sortKey, setSortKey] = useState("")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
-  const [showDialog, setShowDialog] = useState(false)
-  const [createPaymentId, setCreatePaymentId] = useState("")
-  const [createAmount, setCreateAmount] = useState("")
-  const [createReason, setCreateReason] = useState<RefundReason>("manual")
   const [statusFilter, setStatusFilter] = useState<string>("")
   const [reasonFilter, setReasonFilter] = useState<string>("")
   const [dateRange, setDateRange] = useState<string>("")
@@ -59,7 +55,6 @@ export default function RefundsPage() {
   }), [page, statusFilter, reasonFilter, dateFrom, searchQ])
 
   const refundsQuery = useRefunds(filters)
-  const createRefund = useCreateRefund()
   const refunds = (refundsQuery.data?.data ?? []) as Refund[]
   const pagination = refundsQuery.data?.pagination ?? { page: 1, limit: 20, total: 0, has_more: false }
 
@@ -94,19 +89,6 @@ export default function RefundsPage() {
     else setSelected(new Set(refunds.map((r) => r.id)))
   }
 
-  const handleCreate = async () => {
-    if (!createPaymentId || !createAmount) return
-    await createRefund.mutateAsync({
-      payment_id: createPaymentId,
-      amount_cents: Number(createAmount),
-      reason: createReason,
-    })
-    setCreatePaymentId("")
-    setCreateAmount("")
-    setShowDialog(false)
-    toast({ description: "Refund creado exitosamente" })
-  }
-
   const handleCopy = (text: string) => {
     copy(text)
     toast({ description: "ID copiado al portapapeles" })
@@ -131,7 +113,6 @@ export default function RefundsPage() {
           <div className="btn-group">
             <button className="btn btn-secondary" onClick={() => refundsQuery.refetch()} disabled={refundsQuery.isFetching}>{refundsQuery.isFetching ? <><Icons.Retry /> Refrescando…</> : <><Icons.Retry /> Refrescar</>}</button>
             <button className="btn btn-secondary" onClick={() => exportCsv()}><Icons.Download /> Exportar</button>
-            <button className="btn btn-primary" onClick={() => setShowDialog(true)}><Icons.Plus /> Crear refund</button>
           </div>
         </div>
 
@@ -203,11 +184,8 @@ export default function RefundsPage() {
                   <tr>
                     <td colSpan={9} className="empty">
                       <div className="icon-wrap"><Icons.Undo /></div>
-                      <div className="t">No hay reembolsos</div>
-                      <div className="s">Creá uno nuevo desde un pago aprobado.</div>
-                      <div className="a">
-            <button className="btn btn-primary" onClick={() => setShowDialog(true)}><Icons.Plus /> Crear reembolso</button>
-                      </div>
+                    <div className="t">No hay reembolsos</div>
+                      <div className="s">Los reembolsos se crean desde el detalle de un pago aprobado.</div>
                     </td>
                   </tr>
                 ) : (
@@ -256,75 +234,6 @@ export default function RefundsPage() {
         </div>
       </AdminShell>
 
-      {showDialog && (
-        <div className="dialog-backdrop">
-          <div className="dialog lg">
-            <div className="dialog-head">
-              <div className="row" style={{ justifyContent: "space-between" }}>
-                <div>
-                  <div className="dialog-title">Crear reembolso</div>
-                  <div className="dialog-sub">El reembolso se procesa contra Mercado Pago.</div>
-                </div>
-                <span className="icon-btn" onClick={() => setShowDialog(false)} aria-label="Cerrar"><Icons.X /></span>
-              </div>
-            </div>
-            <div className="dialog-body">
-              <div className="field">
-                <span className="l" id="refund-payment-label">ID de Pago <span className="required">*</span></span>
-                <input
-                  type="text"
-                  value={createPaymentId}
-                  onChange={(e) => setCreatePaymentId(e.target.value)}
-                  placeholder="pay_..."
-                  className="input"
-                  aria-labelledby="refund-payment-label"
-                  style={{ width: "100%", fontFamily: "var(--font-geist-mono)", fontSize: 13 }}
-                />
-              </div>
-              <div className="field">
-                <span className="l" id="refund-amount-label">Monto <span className="required">*</span></span>
-                <input
-                  type="number"
-                  value={createAmount}
-                  onChange={(e) => setCreateAmount(e.target.value)}
-                  placeholder="Monto en centavos"
-                  className="input"
-                  aria-labelledby="refund-amount-label"
-                  style={{ width: "100%" }}
-                />
-              </div>
-              <div className="field">
-                <span className="l" id="refund-reason-label">Motivo <span className="required">*</span></span>
-                <select
-                  value={createReason}
-                  onChange={(e) => setCreateReason(e.target.value as RefundReason)}
-                  className="input"
-                  aria-labelledby="refund-reason-label"
-                  style={{ width: "100%" }}
-                >
-                  <option value="seller_rejected">Vendedor rechazó</option>
-                  <option value="buyer_cancelled">Comprador canceló</option>
-                  <option value="not_delivered">No entregado</option>
-                  <option value="manual">Manual (admin)</option>
-                </select>
-              </div>
-              <div className="alert warn" role="alert">
-                <Icons.AlertTri className="ic" />
-                <div className="col">
-                  <span className="a-title">Esta acción es irreversible</span>
-                  <span className="a-body">Al confirmar, Mercado Pago iniciará el reembolso. Las liquidaciones asociadas pasarán a canceled automáticamente.</span>
-                </div>
-              </div>
-            </div>
-            <div className="dialog-foot">
-              <button className="btn btn-ghost" onClick={() => setShowDialog(false)}>Cancelar</button>
-              <button className="btn btn-primary" onClick={handleCreate} disabled={createRefund.isPending}>
-                <Icons.Undo /> Confirmar reembolso
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </>
   )
 }

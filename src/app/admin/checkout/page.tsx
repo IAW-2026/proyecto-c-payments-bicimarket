@@ -43,13 +43,13 @@ export default function CheckoutPage() {
         amount_cents: amountCents,
         currency: "ARS",
         return_urls: {
-          success: `${origin}/checkout?result=success&payment_id={payment_id}`,
-          failure: `${origin}/checkout?result=failure&payment_id={payment_id}`,
-          pending: `${origin}/checkout?result=pending&payment_id={payment_id}`,
+          success: `${origin}/admin/checkout?result=success&payment_id={payment_id}`,
+          failure: `${origin}/admin/checkout?result=failure&payment_id={payment_id}`,
+          pending: `${origin}/admin/checkout?result=pending&payment_id={payment_id}`,
         },
         items_summary: [
           {
-            seller_profile_id: "seller_demo",
+            seller_profile_id: "slp_e6922a44adb54fd78b02c7d4fdb6dc86",
             subtotal_cents: amountCents,
             shipping_cost_cents: 0,
           },

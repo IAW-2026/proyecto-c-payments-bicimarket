@@ -6,7 +6,7 @@ import { useParams } from "next/navigation"
 import { AdminShell } from "@/components/admin/admin-shell"
 import { Icons } from "@/lib/icons"
 import { ARS, formatDate } from "@/lib/currency"
-import { useSettlement } from "@/hooks/use-settlements"
+import { useCreatePayout, useSettlement } from "@/hooks/use-settlements"
 import { useToast } from "@/hooks/use-toast"
 
 export default function SettlementDetailPage() {
@@ -15,6 +15,7 @@ export default function SettlementDetailPage() {
   const settlementId = Array.isArray(params.id) ? params.id[0] : params.id
 
   const settlement = useSettlement(settlementId)
+  const createPayout = useCreatePayout()
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text)
@@ -87,6 +88,11 @@ export default function SettlementDetailPage() {
           </div>
           <div className="btn-group">
             <button className="btn btn-secondary" onClick={downloadReport}><Icons.Download /> Exportar</button>
+            {d.status === "pending" && (!d.payouts || d.payouts.length === 0) && (
+              <button className="btn btn-primary" onClick={async () => { try { await createPayout.mutateAsync(d.id); toast({ description: "Pago generado exitosamente" }) } catch { toast({ description: "Error al generar el pago" }) } }} disabled={createPayout.isPending}>
+                {createPayout.isPending ? "Generando…" : <><Icons.Send /> Generar pago</>}
+              </button>
+            )}
           </div>
         </div>
 

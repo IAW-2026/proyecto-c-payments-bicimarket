@@ -15,6 +15,13 @@ Módulo de pagos del marketplace BiciMarket. Administra pagos, reembolsos, liqui
 
 ---
 
+## Usuario Admin (Clerk)
+Iniciar sesión con el siguiente usuario: 
+ - email: adminpaymentsclerk_test@iaw.com
+ - contraseña: iawuser#
+
+---
+
 ## Instrucciones para probar MP:
  1. Entrar a /checkout para crear un pago, elegir el monto
  2. Iniciar sesión dentro de MP con las siguientes credenciales:
@@ -22,22 +29,14 @@ Módulo de pagos del marketplace BiciMarket. Administra pagos, reembolsos, liqui
   - usuario: TESTUSER5539129628521320852
   - contraseña: vDOl8CvAXy
   - código mail (en caso de que lo pida): 117641
- 3. Pagar con la tarjeta o dinero en cuenta. (CVV: 123, DNI: 12345678)
+ 3. Pagar con la tarjeta o dinero en cuenta. (CVV: 123)
  4. Chequear estado en la página de admin dentro de /payments.
 
----
+## Limitaciones
 
-### Admin (Clerk)
-
-Iniciar sesión en `/sign-in` con una cuenta Clerk que tenga `publicMetadata.admin = true`.
-
-### Service Tokens (inter-app)
-
-```env
-BUYER_TO_PAYMENTS_SERVICE_TOKEN=change-me-buyer-to-payments
-PAYMENTS_TO_BUYER_SERVICE_TOKEN=change-me-payments-to-buyer
-SHIPPING_TO_PAYMENTS_SERVICE_TOKEN=change-me-shipping-to-payments
-```
+Ya que el sandbox no funciona correctamente la implementación se hace tomando el init_point que devuelve MercadoPago para un pago, logueandose con las credenciales de un buyer de prueba y haciendo la compra. Además de usar las credenciales del seller de prueba para toda la implementación.
+Esto lleva a otros problemas como no permitir los reembolsos automáticos (por eso siempre que se hagan van a aparecer fallidos)
+O a tarjetas de prueba que no son funcionales de acuerdo a la spec de MercadoPago.
 
 ---
 
@@ -66,7 +65,7 @@ npx prisma db seed
 npm run dev
 ```
 
-Abrir `http://localhost:3000`. Health check: `GET /api/health`. 
+Abrir `http://localhost:3000`.
 Nota: mercadopago no va a funcionar en localhost, es más fácil hacer la prueba en vercel.
 
 ---

@@ -1310,21 +1310,25 @@ Solo si `status=pending`. **Request** (opcional): `{ "reason": "Cliente canceló
 
 ### `POST /api/v1/payments/{paymentId}/refund`
 
-Reembolso desde Seller App o admin. **Auth**: Seller token **o** admin (con `admin=true`). El fallback admin permite al panel de Payments emitir reembolsos directos sin depender de Seller App.
+**Único punto de creación de reembolsos** (el antiguo `POST /api/v1/refunds` fue eliminado). **Auth**: Seller token **o** admin (con `admin=true`).
+
+El panel admin ofrece dos modos desde el detalle del pago:
+- **Total**: reembolsa el monto completo → el payment pasa a `refunded`.
+- **Parcial (porcentaje)**: el admin ingresa un porcentaje (1–100), se calcula el monto → el payment queda `approved`.
 
 **Request**
 
 ```json
 {
   "amount_cents": 66200000,
-  "reason": "seller_rejected",
+  "reason": "manual",
   "seller_profile_id": "slp_01H…"
 }
 ```
 
 `reason`: `seller_rejected` | `buyer_cancelled` | `not_delivered` | `manual`.
 
-**Response 200**: refund creado.
+**Response 201**: refund creado y procesado contra MP.
 
 ```json
 {
@@ -1334,7 +1338,7 @@ Reembolso desde Seller App o admin. **Auth**: Seller token **o** admin (con `adm
     "amount_cents": 66200000,
     "currency": "ARS",
     "status": "approved",
-    "reason": "seller_rejected",
+    "reason": "manual",
     "gateway_reference": "mp_refund_555",
     "created_at": "2026-04-26T10:00:00Z"
   }
@@ -1354,27 +1358,6 @@ Lista paginada de reembolsos. **Auth**: admin only.
 **Response 200**: `{ data: [<Refund>], pagination: {...} }`
 
 Cada refund incluye `payment` (order_id, status, amount_cents) y `status_history`.
-
-### `POST /api/v1/refunds`
-
-Crear reembolso manualmente desde admin. **Auth**: admin only.
-
-Procesa el reembolso contra MP. Si es total, pasa el payment a `refunded`.
-
-**Headers**: `Idempotency-Key` opcional.
-
-**Request**
-
-```json
-{
-  "payment_id": "pay_01H…",
-  "amount_cents": 66200000,
-  "reason": "manual",
-  "seller_profile_id": "slp_01H…"
-}
-```
-
-**Response 201**: refund creado y procesado.
 
 ### `GET /api/v1/refunds/{refundId}`
 
@@ -1743,11 +1726,11 @@ Sin cambios entre old-docs y actual.
 | Endpoint | old-docs | actual |
 |----------|----------|--------|
 | `GET /api/v1/refunds` | No existía | Lista paginada con filtros |
-| `POST /api/v1/refunds` | No existía | Crear reembolso manual (admin) |
+| `POST /api/v1/refunds` | No existía → **Eliminado** | Se crea solo desde `POST /api/v1/payments/{id}/refund` (detalle del pago) |
 | `GET /api/v1/refunds/{id}` | No existía | Detalle + status_history |
 | `PATCH /api/v1/refunds/{id}` | No existía | Actualizar estado manual |
 
-Por qué: el dashboard admin necesita crear y trackear reembolsos sin depender de Seller App. Los refunds antes solo existían como sub-recurso de payment (`POST /payments/{id}/refund`).
+Por qué: el dashboard admin necesita crear y trackear reembolsos sin depender de Seller App. Los refunds antes solo existían como sub-recurso de payment (`POST /payments/{id}/refund`). Se eliminó `POST /api/v1/refunds` para centralizar la creación en un único punto: el detalle del pago, con dos modos (total o porcentaje).
 
 ### D. P3 — Comprobantes
 

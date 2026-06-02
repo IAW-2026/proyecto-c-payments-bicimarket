@@ -73,8 +73,8 @@ export default function PayoutsPage() {
   const sortedPayouts = useMemo(() => {
     if (!sortKey) return displayedPayouts
     return [...displayedPayouts].sort((a, b) => {
-      const va = sortKey === "amount" ? (a.settlement?.gross_amount_cents ?? 0) : a.created_at
-      const vb = sortKey === "amount" ? (b.settlement?.gross_amount_cents ?? 0) : b.created_at
+      const va = sortKey === "amount" ? (a.settlement?.net_amount_cents ?? 0) : a.created_at
+      const vb = sortKey === "amount" ? (b.settlement?.net_amount_cents ?? 0) : b.created_at
       const cmp = va < vb ? -1 : va > vb ? 1 : 0
       return sortDir === "asc" ? cmp : -cmp
     })
@@ -83,7 +83,7 @@ export default function PayoutsPage() {
   const totals = useMemo(() => {
     let pendingAmount = 0, inProgressAmount = 0
     for (const p of payouts) {
-      const amount = p.settlement?.gross_amount_cents ?? 0
+      const amount = p.settlement?.net_amount_cents ?? 0
       if (p.status === "pending") pendingAmount += amount
       if (p.status === "in_progress") inProgressAmount += amount
     }
@@ -187,7 +187,7 @@ export default function PayoutsPage() {
                     <td className="id"><Link href={`/admin/payouts/${p.id}`} className="row-link" onClick={e => e.stopPropagation()}>{p.id}</Link></td>
                     <td className="id">{p.settlement_id.slice(0, 14)}…</td>
                     <td><span className={`badge ${p.status}`}><span className="dot" />{{ pending: "pendiente", in_progress: "en curso", completed: "completado", failed: "fallido", manual_review: "revisión manual" }[p.status] ?? p.status}</span></td>
-                    <td className="num tnum" style={{ fontWeight: 500 }}>{ARS(p.settlement?.gross_amount_cents ?? 0)}</td>
+                    <td className="num tnum" style={{ fontWeight: 500 }}>{ARS(p.settlement?.net_amount_cents ?? 0)}</td>
                     <td className="actions-cell" onClick={e => e.stopPropagation()}><span className="icon-btn" onClick={() => handleCopy(p.id)} aria-label="Copiar ID" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} title="Copiar ID"><Icons.Copy /></span></td>
                   </tr>
                 ))

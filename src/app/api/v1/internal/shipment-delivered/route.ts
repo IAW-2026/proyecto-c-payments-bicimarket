@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { validateServiceTokenShipping } from '@/lib/service-token'
+import { requireAdmin } from '@/lib/admin-auth'
 import { calculateSettlementAmounts } from '@/services/settlement.service'
 import { notifySellerPaymentStatus } from '@/services/inter-app-client.service'
 import { handleRouteError, badRequest, notFound, unauthorized } from '@/lib/errors'
@@ -9,7 +10,8 @@ export async function POST(req: Request) {
   try {
     const svcToken = req.headers.get('X-Service-Token') || req.headers.get('x-service-token')
     if (!validateServiceTokenShipping(svcToken)) {
-      return unauthorized('Invalid or missing service token', 'SERVICE_TOKEN_INVALID')
+      const adminErr = await requireAdmin()
+      if (adminErr) return unauthorized('Invalid or missing service token', 'SERVICE_TOKEN_INVALID')
     }
 
     const body = await req.json()

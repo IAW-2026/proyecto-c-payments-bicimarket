@@ -33,6 +33,8 @@ export default function PaymentDetailPage() {
 
   const [activeTab, setActiveTab] = useState("overview")
   const [showRefundDialog, setShowRefundDialog] = useState(false)
+  const [refundMode, setRefundMode] = useState<"total" | "percentage">("total")
+  const [refundPercentage, setRefundPercentage] = useState("100")
   const [refundAmount, setRefundAmount] = useState("")
   const payment = usePayment(paymentId)
   const settlements = useSettlements({ paymentId, page: 1, limit: 20 })
@@ -83,10 +85,14 @@ export default function PaymentDetailPage() {
   const settlementStatusLabels: Record<string, string> = { pending: "pendiente", paid: "pagado", failed: "fallido", manual_review: "revisión manual", cancelled: "cancelado" }
 
   const handleRefund = async () => {
-    const amountCents = Math.round(parseFloat(refundAmount) * 100)
+    const amountCents = refundMode === "total"
+      ? d.amount_cents
+      : Math.round(d.amount_cents * (parseInt(refundPercentage) || 0) / 100)
     if (amountCents <= 0 || amountCents > d.amount_cents) return
     await refundPayment.mutateAsync({ paymentId: d.id, amount_cents: amountCents, reason: "manual" })
     setShowRefundDialog(false)
+    setRefundMode("total")
+    setRefundPercentage("100")
     setRefundAmount("")
     router.refresh()
     toast({ description: "Reembolso iniciado exitosamente" })
@@ -121,7 +127,7 @@ export default function PaymentDetailPage() {
             </div>
             <h1 className="page-title" style={{ fontSize: 30, margin: 0 }}>{ARS(d.amount_cents)}</h1>
             <div className="row gap-4 muted" style={{ fontSize: 13, flexWrap: "wrap" }}>
-              <span>Orden <span className="mono" style={{ color: "var(--primary)", fontWeight: 500 }}>{d.order_id.slice(0, 18)}…</span></span>
+              <span className="row gap-2" style={{ alignItems: "center", display: "inline-flex" }}>Orden <span className="mono" style={{ color: "var(--primary)", fontWeight: 500 }}>{d.order_id}</span><span className="icon-btn" onClick={() => handleCopy(d.order_id)} aria-label="Copiar ID de Orden" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} title="Copiar ID de Orden"><Icons.Copy /></span></span>
               <span>·</span>
               <span>Iniciado {formatDate(d.created_at)}</span>
               {d.approved_at && <><span>·</span><span>Aprobado {formatDate(d.approved_at)}</span></>}
@@ -129,7 +135,7 @@ export default function PaymentDetailPage() {
           </div>
           <div className="btn-group">
             <button className="btn btn-secondary" onClick={downloadReceipt}><Icons.Download /> Comprobante</button>
-            <button className="btn btn-primary" onClick={() => { setRefundAmount((d.amount_cents / 100).toFixed(2)); setShowRefundDialog(true) }} disabled={refundPayment.isPending}>
+            <button className="btn btn-primary" onClick={() => { setRefundMode("total"); setRefundPercentage("100"); setRefundAmount((d.amount_cents / 100).toFixed(2)); setShowRefundDialog(true) }} disabled={refundPayment.isPending}>
               <Icons.Undo /> Reembolsar
             </button>
             <Dialog open={showRefundDialog} onOpenChange={setShowRefundDialog}>
@@ -137,26 +143,59 @@ export default function PaymentDetailPage() {
                 <DialogHeader>
                   <DialogTitle>Reembolsar pago</DialogTitle>
                   <DialogDescription>
-                    El saldo máximo a reembolsar es {ARS(d.amount_cents)}.
+                    Seleccioná el tipo de reembolso. El saldo máximo es {ARS(d.amount_cents)}.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="grid gap-4 py-2">
                   <div className="grid gap-2">
-                    <Label htmlFor="amount">Monto a reembolsar</Label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">$</span>
-                      <Input
-                        id="amount"
-                        type="number"
-                        step="0.01"
-                        min="0.01"
-                        max={(d.amount_cents / 100).toFixed(2)}
-                        value={refundAmount}
-                        onChange={(e) => setRefundAmount(e.target.value)}
-                        className="pl-7"
-                      />
+                    <Label htmlFor="refund-mode">Tipo de reembolso</Label>
+                    <div className="flex gap-4">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="refund-mode"
+                          value="total"
+                          checked={refundMode === "total"}
+                          onChange={() => { setRefundMode("total"); setRefundAmount((d.amount_cents / 100).toFixed(2)) }}
+                        />
+                        <span>Total ({ARS(d.amount_cents)})</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="radio"
+                          name="refund-mode"
+                          value="percentage"
+                          checked={refundMode === "percentage"}
+                          onChange={() => setRefundMode("percentage")}
+                        />
+                        <span>Parcial (porcentaje)</span>
+                      </label>
                     </div>
                   </div>
+                  {refundMode === "percentage" && (
+                    <div className="grid gap-2">
+                      <Label htmlFor="refund-pct">Porcentaje a reembolsar</Label>
+                      <div className="relative">
+                        <Input
+                          id="refund-pct"
+                          type="number"
+                          min="1"
+                          max="100"
+                          value={refundPercentage}
+                          onChange={(e) => {
+                            setRefundPercentage(e.target.value)
+                            const pct = parseInt(e.target.value) || 0
+                            setRefundAmount((d.amount_cents * pct / 100 / 100).toFixed(2))
+                          }}
+                          className="pr-8"
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">%</span>
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Monto calculado: {ARS(Math.round(d.amount_cents * (parseInt(refundPercentage) || 0) / 100))}
+                      </p>
+                    </div>
+                  )}
                 </div>
                 <DialogFooter>
                   <button className="btn btn-primary" onClick={handleRefund} disabled={refundPayment.isPending}>
@@ -302,7 +341,10 @@ export default function PaymentDetailPage() {
                     </div>
                     <div className="row" style={{ justifyContent: "space-between" }}>
                       <span className="muted">ID de Orden</span>
-                      <span className="mono" style={{ fontSize: 12 }}>{d.order_id}</span>
+                      <span className="row gap-1" style={{ alignItems: "center" }}>
+                        <span className="mono" style={{ fontSize: 12 }}>{d.order_id}</span>
+                        <span className="icon-btn" onClick={() => handleCopy(d.order_id)} aria-label="Copiar ID de Orden" tabIndex={0} onKeyDown={e => { if (e.key==='Enter'||e.key===' ') { e.preventDefault(); e.currentTarget.click() } }} title="Copiar ID de Orden"><Icons.Copy /></span>
+                      </span>
                     </div>
                     <div className="row" style={{ justifyContent: "space-between" }}>
                       <span className="muted">Perfil del comprador</span>
