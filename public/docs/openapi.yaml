@@ -360,61 +360,6 @@ paths:
                       $ref: '#/components/schemas/Refund'
                   pagination:
                     $ref: '#/components/schemas/Pagination'
-    post:
-      summary: Crear reembolso (admin)
-      description: |
-        **Crear reembolso manualmente** desde el panel de admin.
-
-        Requiere `Idempotency-Key`. Procesa el reembolso contra MP y actualiza el estado del pago
-        (`refunded` si es total, `approved` si es parcial).
-      tags:
-        - "Reembolsos"
-      security:
-        - bearerAuth: []
-      parameters:
-        - in: header
-          name: Idempotency-Key
-          required: false
-          schema: { type: string, format: uuid }
-          description: UUID for idempotent refund creation
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              properties:
-                payment_id:
-                  type: string
-                  description: Payment ID (pay_...)
-                amount_cents:
-                  type: integer
-                  description: Refund amount in cents
-                reason:
-                  type: string
-                  enum: [seller_rejected, buyer_cancelled, not_delivered, manual]
-                  default: manual
-                  description: Reason for the refund
-                seller_profile_id:
-                  type: string
-                  nullable: true
-                  description: Seller profile ID (slp_...)
-              required: [payment_id, amount_cents, reason]
-      responses:
-        '201':
-          description: Refund created and processed
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  data:
-                    $ref: '#/components/schemas/Refund'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '404':
-          $ref: '#/components/responses/NotFound'
-
   /api/v1/refunds/{refundId}:
     get:
       summary: Obtener reembolso
@@ -681,7 +626,6 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
-  /api/v1/settlements/mark_paid:
     patch:
       summary: Marcar liquidaciones como pagadas
       description: |
@@ -954,7 +898,7 @@ paths:
               schema:
                 type: object
                 properties:
-                  received:
+                  ok:
                     type: boolean
 
 components:
