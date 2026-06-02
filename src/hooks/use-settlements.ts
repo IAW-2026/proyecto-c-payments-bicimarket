@@ -79,6 +79,8 @@ export function useMarkPayoutPaid() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['payout'] })
       queryClient.invalidateQueries({ queryKey: ['payouts'] })
+      queryClient.invalidateQueries({ queryKey: ['settlement'] })
+      queryClient.invalidateQueries({ queryKey: ['settlements'] })
     }
   })
 }

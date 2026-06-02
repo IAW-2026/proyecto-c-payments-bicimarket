@@ -20,19 +20,16 @@ export async function PATCH(
       return conflict('ALREADY_PAID', 'Payout already marked as paid')
     }
 
-    const updated = await prisma.payout.update({
-      where: { id: payoutId },
-      data: { status: 'completed', completed_at: new Date() },
-      include: {
-        settlement: {
-          include: {
-            payment: {
-              select: { id: true, order_id: true, amount_cents: true, status: true, created_at: true, buyer_profile_id: true },
-            },
-          },
-        },
-      },
-    })
+    const [updated] = await prisma.$transaction([
+      prisma.payout.update({
+        where: { id: payoutId },
+        data: { status: 'completed', completed_at: new Date() },
+      }),
+      prisma.settlement.update({
+        where: { id: payout.settlement_id },
+        data: { status: 'paid', paid_at: new Date() },
+      }),
+    ])
 
     return NextResponse.json({ data: updated })
   } catch (err) {
