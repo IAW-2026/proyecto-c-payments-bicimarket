@@ -49,7 +49,7 @@ export default function CheckoutPage() {
         },
         items_summary: [
           {
-            seller_profile_id: "slp_e6922a44adb54fd78b02c7d4fdb6dc86",
+            seller_profile_id: "seller_demo",
             subtotal_cents: amountCents,
             shipping_cost_cents: 0,
           },

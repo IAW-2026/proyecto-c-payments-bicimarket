@@ -23,20 +23,50 @@ Iniciar sesión con el siguiente usuario:
 ---
 
 ## Instrucciones para probar MP:
- 1. Entrar a /checkout para crear un pago, elegir el monto
+ 1. Entrar a /checkout para crear un pago, elegir el monto (recomendado hacerlo en incógnito)
  2. Iniciar sesión dentro de MP con las siguientes credenciales:
   - email: test_user_5539129628521320852@testuser.com (en caso de que no esté ya iniciado, se envía en el body por defecto)
   - usuario: TESTUSER5539129628521320852
   - contraseña: vDOl8CvAXy
   - código mail (en caso de que lo pida): 117641
  3. Pagar con la tarjeta o dinero en cuenta. (CVV: 123)
- 4. Chequear estado en la página de admin dentro de /payments.
+ 4. Chequear estado del pago en la página de admin dentro de /payments.
+
+---
 
 ## Limitaciones
 
 Ya que el sandbox no funciona correctamente la implementación se hace tomando el init_point que devuelve MercadoPago para un pago, logueandose con las credenciales de un buyer de prueba y haciendo la compra. Además de usar las credenciales del seller de prueba para toda la implementación.
 Esto lleva a otros problemas como no permitir los reembolsos automáticos (por eso siempre que se hagan van a aparecer fallidos)
 O a tarjetas de prueba que no son funcionales de acuerdo a la spec de MercadoPago.
+
+---
+
+## Instrucciones para probar Settlements y Payouts:
+En la implementación final esto en realidad va a ser llamado por Shipping, pero provisoriamente se prueba de la siguiente manera:
+ 1. Buscar un pago aprobado y copiar su order_id
+ 2. Ir a /admin/order-delivered
+ 3. Buscar el id de order, y seleccionar crear una liquidación para el pago
+ 4. Ir a /admin/settlements para ver la liquidación creada
+ 5. Entrar al detalle de la liquidación y hacer clic en "Generar pago"
+ 6. Ir a /admin/payouts para ver el payout en cola
+ 7. Entrar al detalle del payout y marcarlo como pagado
+
+---
+
+## Por qué tenemos settlements y payouts
+
+**Settlement (liquidación):** asiento contable que registra cuánto se le debe a un vendedor. Se crea automáticamente al confirmar la entrega de una orden. Calcula el bruto (subtotal + envío), la comisión del marketplace (10%) y el neto a pagar. Una liquidación puede existir sin payout — representa un derecho de cobro pendiente.
+
+**Payout (pago a vendedor):** la ejecución real de la transferencia de dinero. Se crea manualmente desde una liquidación `pending` y pasa por estados `in_progress` → `completed` (o `failed`/`manual_review` si algo sale mal). Tiene datos operativos como `transfer_id`, intentos y errores.
+
+Separarlos permite:
+- **Conciliación:** saber en todo momento qué está calculado (settlement) vs. qué se transfirió realmente (payout).
+- **Reintentos:** si un payout falla, se puede reintentar sin duplicar el asiento contable.
+- **Batch de pagos:** el área de finanzas puede procesar varios payouts juntos contra Mercado Pago sin confundir los cálculos.
+- **Auditoría:** una settlement puede tener múltiples payouts (ej. reintentos), manteniendo el historial completo.
+
+El flujo completo: `Payment` → `Settlement` (pending) → `Payout` (in_progress) → `Payout` (completed) → `Settlement` (paid).
 
 ---
 
