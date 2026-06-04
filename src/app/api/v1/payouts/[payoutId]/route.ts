@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin } from '@/lib/admin-auth'
+import { validateSettlementTransition } from '@/lib/state-machines/settlement'
 import { handleRouteError, notFound, conflict } from '@/lib/errors'
 
 export async function PATCH(
@@ -18,6 +19,15 @@ export async function PATCH(
     }
     if (payout.status === 'completed') {
       return conflict('ALREADY_PAID', 'Payout already marked as paid')
+    }
+
+    const settlement = await prisma.settlement.findUnique({ where: { id: payout.settlement_id } })
+    if (settlement) {
+      try {
+        validateSettlementTransition(settlement.status as any, 'paid')
+      } catch {
+        return conflict('INVALID_SETTLEMENT_STATE', `Settlement is in ${settlement.status} state, cannot be marked as paid`)
+      }
     }
 
     const [updated] = await prisma.$transaction([

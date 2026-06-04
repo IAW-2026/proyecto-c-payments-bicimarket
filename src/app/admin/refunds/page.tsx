@@ -190,7 +190,7 @@ export default function RefundsPage() {
                   </tr>
                 ) : (
                   sortedRefunds.map((r) => {
-                    const payment = (r as Refund & { payment?: { order_id?: string } }).payment
+                    const payment = (r as Refund & { payment?: { order_id?: string; amount_cents?: number } }).payment
                     return (
                       <tr key={r.id} className={selected.has(r.id) ? "row-selected" : ""} onClick={() => router.push(`/admin/refunds/${r.id}`)} style={{ cursor: "pointer" }}>
                         <td className="checkbox-cell" onClick={e => e.stopPropagation()}>
@@ -201,7 +201,7 @@ export default function RefundsPage() {
                         <td className="id"><Link href={`/admin/refunds/${r.id}`} className="row-link" onClick={e => e.stopPropagation()}>{r.id}</Link></td>
                         <td className="id">{r.payment_id.slice(0, 14)}…</td>
                         <td className="num tnum" style={{ fontWeight: 500 }}>{ARS(r.amount_cents)}</td>
-                        <td><span className="tag" style={{ textTransform: "capitalize" }}>{r.amount_cents >= 100000 ? "total" : "parcial"}</span></td>
+                        <td><span className="tag" style={{ textTransform: "capitalize" }}>{r.payment?.amount_cents && r.amount_cents >= r.payment.amount_cents ? "total" : "parcial"}</span></td>
                         <td><span className="badge badge-soft-primary">{reasonLabels[r.reason]}</span></td>
                         <td><span className={`badge ${r.status}`}><span className="dot" />{{ pending: "pendiente", approved: "aprobado", failed: "fallido" }[r.status] ?? r.status}</span></td>
                         <td className="muted mono" style={{ fontSize: 12 }}>{formatDate(r.created_at)}</td>

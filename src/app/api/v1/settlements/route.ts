@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { validateServiceTokenSeller } from '@/lib/service-token'
 import { requireAdmin } from '@/lib/admin-auth'
+import { validateSettlementTransition } from '@/lib/state-machines/settlement'
 import { handleRouteError } from '@/lib/errors'
 
 export async function PATCH(req: Request) {
@@ -32,8 +33,10 @@ export async function PATCH(req: Request) {
           continue
         }
 
-        if (settlement.status !== 'pending') {
-          results.push({ id: settlementId, status: 'skipped', error: `Settlement is in ${settlement.status} state, not pending` })
+        try {
+          validateSettlementTransition(settlement.status as any, 'paid')
+        } catch {
+          results.push({ id: settlementId, status: 'skipped', error: `Settlement is in ${settlement.status} state, cannot be marked as paid` })
           continue
         }
 

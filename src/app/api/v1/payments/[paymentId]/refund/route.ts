@@ -5,6 +5,7 @@ import { requireAdmin } from '@/lib/admin-auth'
 import { extractIdempotencyKey, findRefundByKey } from '@/lib/idempotency'
 import { notifyBuyerOrderStatus } from '@/services/inter-app-client.service'
 import mpService from '@/services/mercado-pago.service'
+import { validatePaymentTransition } from '@/lib/state-machines/payment'
 import { handleRouteError, badRequest, notFound, unauthorized } from '@/lib/errors'
 
 export async function POST(
@@ -33,7 +34,9 @@ export async function POST(
       return notFound('PAYMENT_NOT_FOUND', 'Payment not found', { paymentId })
     }
 
-    if (payment.status !== 'approved') {
+    try {
+      validatePaymentTransition(payment.status as any, 'refunded')
+    } catch {
       return badRequest('INVALID_PAYMENT_STATE', `Cannot refund payment in ${payment.status} state`, {
         current_status: payment.status,
       })

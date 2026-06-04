@@ -8,7 +8,7 @@ import { AdminShell } from "@/components/admin/admin-shell"
 import { Icons } from "@/lib/icons"
 import { ARS, formatDate } from "@/lib/currency"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { usePayment, useRefundPayment } from "@/hooks/use-payments"
+import { usePayment, useRefundPayment, useConfirmPayment, useCancelPayment } from "@/hooks/use-payments"
 import { useRefunds } from "@/hooks/use-refunds"
 import { useSettlements } from "@/hooks/use-settlements"
 import { useToast } from "@/hooks/use-toast"
@@ -40,6 +40,8 @@ export default function PaymentDetailPage() {
   const settlements = useSettlements({ paymentId, page: 1, limit: 20 })
   const refunds = useRefunds({ paymentId, page: 1, limit: 20 })
   const refundPayment = useRefundPayment()
+  const confirmPayment = useConfirmPayment()
+  const cancelPayment = useCancelPayment()
 
   const stats = useMemo(() => {
     const settlementList = settlements.data?.data ?? []
@@ -98,6 +100,36 @@ export default function PaymentDetailPage() {
     toast({ description: "Reembolso iniciado exitosamente" })
   }
 
+  const handleApprove = async () => {
+    try {
+      await confirmPayment.mutateAsync({ paymentId: d.id, status: 'approved', reason: 'Manual approval from admin' })
+      toast({ description: "Pago aprobado manualmente" })
+      router.refresh()
+    } catch {
+      toast({ description: "Error al aprobar el pago", type: "error" })
+    }
+  }
+
+  const handleReject = async () => {
+    try {
+      await confirmPayment.mutateAsync({ paymentId: d.id, status: 'rejected', reason: 'Manual rejection from admin' })
+      toast({ description: "Pago rechazado manualmente" })
+      router.refresh()
+    } catch {
+      toast({ description: "Error al rechazar el pago", type: "error" })
+    }
+  }
+
+  const handleCancel = async () => {
+    try {
+      await cancelPayment.mutateAsync({ paymentId: d.id, reason: 'Manual cancellation from admin' })
+      toast({ description: "Pago cancelado manualmente" })
+      router.refresh()
+    } catch {
+      toast({ description: "Error al cancelar el pago", type: "error" })
+    }
+  }
+
   const downloadReceipt = () => {
     const header = ["field", "value"].join(",")
     const rows = [
@@ -135,9 +167,24 @@ export default function PaymentDetailPage() {
           </div>
           <div className="btn-group">
             <button className="btn btn-secondary" onClick={downloadReceipt}><Icons.Download /> Comprobante</button>
-            <button className="btn btn-primary" onClick={() => { setRefundMode("total"); setRefundPercentage("100"); setRefundAmount((d.amount_cents / 100).toFixed(2)); setShowRefundDialog(true) }} disabled={refundPayment.isPending}>
-              <Icons.Undo /> Reembolsar
-            </button>
+            {d.status === 'pending' && (
+              <>
+                <button className="btn btn-primary" onClick={handleApprove} disabled={confirmPayment.isPending}>
+                  <Icons.Check /> Aprobar
+                </button>
+                <button className="btn btn-destructive" onClick={handleReject} disabled={confirmPayment.isPending}>
+                  <Icons.X /> Rechazar
+                </button>
+                <button className="btn btn-secondary" onClick={handleCancel} disabled={cancelPayment.isPending}>
+                  <Icons.Close /> Cancelar
+                </button>
+              </>
+            )}
+            {d.status === 'approved' && (
+              <button className="btn btn-primary" onClick={() => { setRefundMode("total"); setRefundPercentage("100"); setRefundAmount((d.amount_cents / 100).toFixed(2)); setShowRefundDialog(true) }} disabled={refundPayment.isPending}>
+                <Icons.Undo /> Reembolsar
+              </button>
+            )}
             <Dialog open={showRefundDialog} onOpenChange={setShowRefundDialog}>
               <DialogContent>
                 <DialogHeader>

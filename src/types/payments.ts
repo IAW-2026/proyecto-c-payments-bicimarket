@@ -63,7 +63,7 @@ export interface Refund {
   reason: RefundReason
   status: RefundStatus
   gateway_reference?: string
-  payment?: Pick<Payment, 'order_id'>
+  payment?: Pick<Payment, 'order_id' | 'amount_cents'>
   created_at: string
   updated_at: string
 }

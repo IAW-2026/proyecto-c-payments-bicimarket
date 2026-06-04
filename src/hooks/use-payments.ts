@@ -64,3 +64,33 @@ export function useRefundPayment() {
     }
   })
 }
+
+export function useConfirmPayment() {
+  const qc = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ paymentId, status, reason }: { paymentId: string; status: 'approved' | 'rejected'; reason?: string }) => {
+      const { data } = await axios.patch(`/api/v1/payments/${paymentId}/confirm`, { status, reason })
+      return data.data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['payments'] })
+      qc.invalidateQueries({ queryKey: ['payment'] })
+    }
+  })
+}
+
+export function useCancelPayment() {
+  const qc = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ paymentId, reason }: { paymentId: string; reason?: string }) => {
+      const { data } = await axios.post(`/api/v1/payments/${paymentId}/cancel`, { reason })
+      return data.data
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['payments'] })
+      qc.invalidateQueries({ queryKey: ['payment'] })
+    }
+  })
+}

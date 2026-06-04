@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import { validatePaymentTransition } from '@/lib/state-machines/payment'
 import mpService from './mercado-pago.service'
 import { notifyBuyerOrderStatus, createSellerSalesOrder } from './inter-app-client.service'
 
@@ -149,6 +150,14 @@ export async function processMpWebhookEvent(mpEventId: string) {
           updateData.status = 'refunded'
         } else if (paymentStatus === 'pending') {
           updateData.status = 'pending'
+        }
+
+        // Validate transition via state machine before applying
+        try {
+          validatePaymentTransition(payment.status as any, updateData.status as any)
+        } catch {
+          console.warn(`[MP Processor] Skipping invalid transition: ${payment.status} → ${updateData.status} for payment ${payment.id}`)
+          return
         }
 
         await prisma.payment.update({ where: { id: payment.id }, data: updateData })
