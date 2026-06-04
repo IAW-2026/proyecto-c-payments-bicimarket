@@ -106,7 +106,7 @@ export default function PaymentDetailPage() {
       toast({ description: "Pago aprobado manualmente" })
       router.refresh()
     } catch {
-      toast({ description: "Error al aprobar el pago", type: "error" })
+      toast({ description: "Error al aprobar el pago", variant: "destructive" })
     }
   }
 
@@ -116,7 +116,7 @@ export default function PaymentDetailPage() {
       toast({ description: "Pago rechazado manualmente" })
       router.refresh()
     } catch {
-      toast({ description: "Error al rechazar el pago", type: "error" })
+      toast({ description: "Error al rechazar el pago", variant: "destructive" })
     }
   }
 
@@ -126,7 +126,7 @@ export default function PaymentDetailPage() {
       toast({ description: "Pago cancelado manualmente" })
       router.refresh()
     } catch {
-      toast({ description: "Error al cancelar el pago", type: "error" })
+      toast({ description: "Error al cancelar el pago", variant: "destructive" })
     }
   }
 
