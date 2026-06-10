@@ -59,7 +59,6 @@ Esto se hace en cada request, pero el costo es despreciable porque solo es un `S
 | Buyer | crea `buyer_profile` con `clerk_user_id`, `email`, `full_name`. Entra directo (no aplica `verification_status`). |
 | Seller | **No crea `seller_profile` automáticamente.** Al primer login, `requireAuth()` hace upsert en la tabla `User` (email snapshot). El vendedor debe completar su perfil llamando a `PUT /api/v1/seller-profile/me`; hasta entonces, cualquier endpoint que requiera `SellerProfile` devuelve `404 SELLER_PROFILE_NOT_FOUND`. Una vez creado, el perfil queda con `verification_status=pending_review` y solo un admin puede pasarlo a `verified`. |
 | Shipping | **no crea automáticamente**. Si el `clerk_user_id` no figura en `logistics_operators`, devuelve 403. Los operadores se crean por admin con `POST /api/v1/logistics-operators`. |
-| Payments | crea `admin_profile` local en su DB **solo si** el JWT trae `publicMetadata.admin=true`. Sin flag admin, devuelve 403 y no crea nada. |
 
 ### 3.3 Provisioning detallado — operador logístico
 
