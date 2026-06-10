@@ -50,12 +50,14 @@ En el middleware de auth de cada app, antes de pasarle el request al controller:
 
 Esto se hace en cada request, pero el costo es despreciable porque solo es un `SELECT` por `clerk_user_id` (índice único). Solo escribe cuando hay cambios reales.
 
+> **Seller App — implementación real**: el helper `requireAuth()` (en `src/lib/api-utils.ts`) hace upsert del `email` en el modelo `User` (tabla auxiliar de sesión). Esto es intencional: mantiene un registro local del usuario autenticado independientemente del `SellerProfile`. El `SellerProfile` **no se crea automáticamente** en el primer login; el vendedor debe llamar a `PUT /api/v1/seller-profile/me` para crearlo explícitamente (ver §3.2).
+
 ### 3.2 Defaults al crear perfil
 
 | App | Acción al primer login |
 |---|---|
 | Buyer | crea `buyer_profile` con `clerk_user_id`, `email`, `full_name`. Entra directo (no aplica `verification_status`). |
-| Seller | crea `seller_profile` con `verification_status=pending_review`. No puede activar productos hasta que un admin lo apruebe. |
+| Seller | **No crea `seller_profile` automáticamente.** Al primer login, `requireAuth()` hace upsert en la tabla `User` (email snapshot). El vendedor debe completar su perfil llamando a `PUT /api/v1/seller-profile/me`; hasta entonces, cualquier endpoint que requiera `SellerProfile` devuelve `404 SELLER_PROFILE_NOT_FOUND`. Una vez creado, el perfil queda con `verification_status=pending_review` y solo un admin puede pasarlo a `verified`. |
 | Shipping | **no crea automáticamente**. Si el `clerk_user_id` no figura en `logistics_operators`, devuelve 403. Los operadores se crean por admin con `POST /api/v1/logistics-operators`. |
 | Payments | crea `admin_profile` local en su DB **solo si** el JWT trae `publicMetadata.admin=true`. Sin flag admin, devuelve 403 y no crea nada. |
 
@@ -122,16 +124,19 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     actor U as Usuario
-    participant CS as Clerk-Seller
+    participant CL as Clerk (compartido)
     participant S as Seller App
     actor A as Admin
 
-    U->>CS: Sign up con email + password
-    CS-->>U: Email de verificación
-    U->>CS: Verifica email
+    U->>CL: Sign up con email + password
+    CL-->>U: Email de verificación
+    U->>CL: Verifica email
+    Note over CL: Admin setea publicMetadata.role=seller
     U->>S: Primer login con JWT
-    S->>S: middleware crea seller_profile (verification_status=pending_review)
-    U->>S: Completa perfil (legal_name, tax_id, pickup_address)
+    S->>S: requireAuth() hace upsert en tabla User (email snapshot)
+    Note over S: SellerProfile NO se crea aquí
+    U->>S: PUT /api/v1/seller-profile/me (legal_name, tax_id, pickup_address)
+    S->>S: crea seller_profile (verification_status=pending_review)
     A->>S: Aprueba (verification_status=verified)
     U->>S: ya puede activar productos
 ```
@@ -178,11 +183,12 @@ Todas las apps usan las **mismas** claves de Clerk (las del Buyer App):
 
 ```env
 # Clerk compartido — mismos valores en los cuatro repos
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_…
 CLERK_PUBLISHABLE_KEY=pk_live_…
 CLERK_SECRET_KEY=sk_live_…
 ```
 
-Las claves `CLERK_PUBLISHABLE_KEY` y `CLERK_SECRET_KEY` son idénticas en Buyer, Seller, Shipping y Payments App.
+Las claves `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_PUBLISHABLE_KEY` y `CLERK_SECRET_KEY` son idénticas en Buyer, Seller, Shipping y Payments App.
 
 ---
 

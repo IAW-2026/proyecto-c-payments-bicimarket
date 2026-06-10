@@ -130,6 +130,11 @@ La Seller App **se compromete a**:
 | Payments App | `PATCH /api/v1/sales-orders/{id}/payment-status`  | Marca settled / refunded.             |
 | Shipping App | `PATCH /api/v1/sales-orders/{id}/shipping-status` | Actualiza estado de envío.            |
 
+### 4.6 Notas de implementación (Seller App)
+
+- **Paginación**: la Seller App implementa `limit=50` como default (en lugar del `limit=20` global). Máximo `limit=100`.
+- **Trazabilidad (`X-Request-Id`)**: la Seller App genera un UUID nuevo por cada llamada saliente en lugar de propagar el ID entrante. La correlación entre apps se hace por `sales_order_id` u otros IDs de negocio.
+
 ---
 
 ## 5. Shipping App

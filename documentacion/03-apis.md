@@ -515,6 +515,8 @@ Lo consume Shipping para cotizar y crear el envío.
 
 **Querystring**: `?q=trek&category=mtb&brand=trek&min_price_cents=10000000&max_price_cents=100000000&seller_id=slp_01H…&sort=-created_at&page=1&limit=20`.
 
+`category` válidos: `mtb` | `road` | `urban` | `kids` | `bmx` | `parts` | `accessories` | `indumentaria`.
+
 **Response 200**
 
 ```json
@@ -699,7 +701,8 @@ Soft delete: pasa a `status=archived`. **Response 204**.
     "postal_code": "C1043",
     "country": "AR"
   },
-  "payment_id": "pay_01H…"
+  "payment_id": "pay_01H…",
+  "shipping_quote_id": "qte_01H…"
 }
 ```
 
@@ -733,7 +736,9 @@ Soft delete: pasa a `status=archived`. **Response 204**.
 
 Marca `fulfillment_status=accepted`.
 
-**Response 200**: sales_order actualizada. Seller App llama internamente a Buyer `PATCH /api/v1/orders/{orderId}/seller-groups/{groupId}/status` con `{ "status": "preparing" }`.
+**Response 200**: sales_order actualizada.
+
+> **Discrepancia de implementación**: según el contrato del sistema (ver `01-descripcion.md §4.1` y `02-responsabilidades.md §4.5`), la Seller App debería notificar a Buyer App con `PATCH /api/v1/orders/{id}/seller-groups/{g}/status (preparing)` al aceptar la orden. La implementación actual de la Seller App **no realiza esta llamada**. Esto es un gap conocido — la notificación queda pendiente y el `order_seller_group.status` no se actualiza hasta que Shipping notifica el cambio de envío.
 
 ### `POST /api/v1/sales-orders/{salesOrderId}/reject`
 
@@ -778,7 +783,36 @@ Cuando pasa a `ready_to_ship`, Seller llama internamente a Shipping `POST /shipm
 
 ---
 
-## S5. Inventario
+## S5. Rutas auxiliares
+
+### `GET /api/v1/seller/products`
+
+Alias interno de `GET /api/v1/seller-profile/me/products`. Devuelve los productos del vendedor autenticado en todos los estados (`draft`, `active`, `paused`, `archived`). Misma forma de respuesta paginada.
+
+**Auth**: Bearer JWT.
+
+### `PATCH /api/v1/admin/seller-profiles/{sellerProfileId}/verification`
+
+**Auth**: Bearer JWT con `publicMetadata.admin=true`.
+
+Cambia el `verification_status` de un perfil de vendedor.
+
+**Request**: `{ "verification_status": "verified" }` — valores válidos: `pending_review` | `verified` | `suspended`.
+
+**Response 200** (respuesta minimal, solo los campos actualizados):
+
+```json
+{
+  "id": "slp_01H…",
+  "verification_status": "verified"
+}
+```
+
+> La respuesta devuelve solo `id` y `verification_status`, no el perfil completo. Diseño deliberado para este endpoint administrativo.
+
+---
+
+## S6. Inventario
 
 > **No aplica en esta etapa.** Por restricción del proyecto el stock es ilimitado, así que no existen los endpoints `PATCH /products/{id}/stock` ni `GET /inventory-movements` ni el recurso `inventory_movements`. Esta sección queda como referencia futura por si en una etapa posterior se decide habilitar control de inventario; mientras tanto, ningún cliente debe llamar a endpoints de stock porque la Seller App no los expone.
 
