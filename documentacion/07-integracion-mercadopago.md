@@ -1,6 +1,6 @@
 # 7. Integracion de Mercado Pago en Payments
 
-> **Archivo nuevo — no existía en `old-docs/`**. Se creó porque el nivel de detalle de la integración real (SDK, Wallet Brick, webhook processor, state machine, idempotencia, mapa de archivos) excedía lo que cabía en `03-apis.md`. Las secciones §3, §7, §11 y §12 son las que más valor agregaron respecto al esquema previo.
+> **Archivo nuevo — no existía en `documentacion-vieja`**. Se creó porque el nivel de detalle de la integración real (SDK, Wallet Brick, webhook processor, state machine, idempotencia, mapa de archivos) excedía lo que cabía en `03-apis.md`. Las secciones §3, §7, §11 y §12 son las que más valor agregaron respecto al esquema previo.
 
 > **Objetivo**: documentar como Payments se integra con Mercado Pago (Checkout Pro), describiendo el flujo real implementado, los componentes involucrados y la trazabilidad de cada operacion.
 

@@ -59,7 +59,17 @@ Esto se hace en cada request, pero el costo es despreciable porque solo es un `S
 | Shipping | **no crea automáticamente**. Si el `clerk_user_id` no figura en `logistics_operators`, devuelve 403. Los operadores se crean por admin con `POST /api/v1/logistics-operators`. |
 | Payments | crea `admin_profile` local en su DB **solo si** el JWT trae `publicMetadata.admin=true`. Sin flag admin, devuelve 403 y no crea nada. |
 
-### 3.3 Soft delete
+### 3.3 Provisioning detallado — operador logístico
+
+| Caso | Acción |
+|---|---|
+| `clerk_user_id` figura en `logistics_operators` con `status=active` | Entra normal, devuelve sus assignments. |
+| `clerk_user_id` figura pero `status=inactive` o `suspended` | 403 `OPERATOR_INACTIVE`. |
+| `clerk_user_id` NO figura | 403 `FORBIDDEN`. Debe ser invitado/creado por admin. |
+| JWT con `publicMetadata.admin=true` | Acceso a endpoints admin. Si no tiene `logistics_operator`, igual puede operar como admin. |
+
+
+### 3.4 Soft delete
 
 Cuando se borra una cuenta en Clerk, no nos enteramos automáticamente. Si hace falta, el admin elimina el perfil local manualmente, o se puede correr un cron diario que pregunte a la API de Clerk por `clerk_user_id`s que ya no existen y los soft-deletea. Para Etapa 1 basta con la limpieza manual.
 

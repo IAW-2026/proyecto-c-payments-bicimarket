@@ -868,6 +868,12 @@ Lo llama Buyer App durante el checkout. Un único request con todos los orígene
 
 `expires_at` = ahora + 60 minutos. Cada quote se usa individualmente al crear el shipment.
 
+**Errores**:
+- `422 POSTAL_CODE_UNKNOWN` con `details: { postal_code }` cuando el destino o un origen no está en el dataset.
+- `422 RATE_NOT_FOUND` con `details: { seller_profile_id, postal_code }` cuando algún origen no matchea una tarifa.
+
+**Idempotencia**: con `Idempotency-Key: K`, las N quotes se persisten con clave `${K}:${idx}` y el endpoint las recupera por prefijo en POST repetidos.
+
 ---
 
 ## SH2. Envíos
@@ -981,6 +987,14 @@ Para correcciones admin. **Auth**: rol `admin` o `logistics`.
 **Request**: `{ "status": "in_transit", "note": "Demora por feriado" }`.
 **Response 200**: shipment actualizado.
 
+### `GET /api/v1/shipment-groups/{groupId}`
+
+Vista GLOBAL del pedido (todos los vendedores + sus pickups). **Auth**: JWT admin u operador. `groupId` acepta el `grp_…` o el tracking global `BMK-…`.
+
+**Response 200**: `ShipmentGroupDTO` con `order_id`, `order_tracking_number`, `rollup_status`, `origins_count` y `shipments[]`.
+
+> **ADR-006 — tracking global**: una orden con N vendedores se agrupa en un `shipment_group` (1 por `order_id`) dueño del tracking GLOBAL (`BMK-…`) que ve el comprador. Cada `shipment` conserva su `tracking_number` individual (`TRK-AR-…`) que ve solo su vendedor.
+
 ---
 
 ## SH3. Paquetes
@@ -1021,6 +1035,8 @@ Para correcciones admin. **Auth**: rol `admin` o `logistics`.
 ```
 
 `event_type`: `created` | `ready_for_pickup` | `picked_up` | `in_transit` | `out_for_delivery` | `delivered` | `failed_delivery` | `returned`.
+
+Las transiciones inválidas se rechazan con `409 INVALID_TRANSITION` y `details: { from, to, allowed }` (ver `06-estados-y-diagramas.md §3`).
 
 **Response 201**: tracking_event creado. Si el evento es terminal de estado, Shipping hace REST a Buyer (`PATCH /api/v1/orders/{id}/seller-groups/{g}/shipping`), a Seller (`PATCH /api/v1/sales-orders/{id}/shipping-status`) y, si es `delivered`, a Payments (`POST /api/v1/internal/shipment-delivered`).
 
@@ -1163,6 +1179,38 @@ Devuelve los envíos asignados al operador logueado.
 
 **Request**: `{ "status": "reassigned", "operator_clerk_user_id": "user_other_xyz" }`.
 **Response 200**.
+
+---
+
+## SH6. Códigos postales (geo)
+
+### `GET /api/v1/postal-codes`
+
+Endpoint **PÚBLICO** (sin auth). Devuelve el dataset embebido de códigos postales argentinos con coordenadas (lat/lng), ciudad y provincia. Lo consume Buyer App para poblar los selectores de dirección con la misma lista que Shipping usa para cotizar (evita duplicar el dataset y cotizar CPs que Shipping no conoce → `422 POSTAL_CODE_UNKNOWN`). También lo usa el form de "nuevo pedido" del admin.
+
+**Auth**: ninguna (público).
+
+**Query params** (opcionales):
+- `q` — filtro de texto; matchea por ciudad, código postal o provincia (case-insensitive).
+- `province` — filtra por provincia (case-insensitive, substring).
+
+**Response 200**
+```json
+{
+  "data": [
+    {
+      "cp": "C1043",
+      "lat": -34.6037,
+      "lng": -58.4044,
+      "city": "Almagro",
+      "province": "Buenos Aires"
+    }
+  ],
+  "total": 1
+}
+```
+
+Sin paginación: la lista es chica (~230 entradas, <30KB) y se ordena por provincia y luego por ciudad. Las coordenadas alimentan el cálculo de distancia (Haversine) del motor de cotización.
 
 ---
 
@@ -1673,93 +1721,179 @@ SHIPPING_TO_PAYMENTS_SERVICE_TOKEN=…
 MERCADOPAGO_WEBHOOK_SECRET=…
 ```
 
+> **Shipping App**: las apps que llaman a Shipping usan un `X-Service-Token` compartido (acordado entre los responsables). Los tokens salientes `SHIPPING_TO_*` se configuran por par origen→destino.
+
 ---
 
-## Apéndice: diferencias entre `docs/` y `documentacion-buyer/`
+## Apéndice A: Contratos referenciados (Shipping → otras apps)
 
-Este apéndice resume todos los cambios que existían entre las dos versiones de la documentación antes de su unificación en `/documentacion/`.
+> Esta sección documenta los endpoints de otras apps desde la perspectiva de Shipping — qué espera recibir Shipping cuando los llama. La especificación completa de cada endpoint vive en la sección de su app dueña.
+
+### CR1. Hidratar dirección de retiro (Seller App)
+
+`GET /api/v1/seller-profile/{sellerProfileId}/pickup-address`
+
+**Auth**: `X-Service-Token` (Shipping → Seller).
+
+**Response 200**
+```json
+{
+  "seller_profile_id": "slp_01H…",
+  "pickup_address": {
+    "street": "Av. Rivadavia", "number": "9000",
+    "city": "Caballito", "province": "Buenos Aires",
+    "postal_code": "C1406", "country": "AR"
+  }
+}
+```
+
+
+
+### CR2. Notificar cambio de envío (Buyer App)
+
+`PATCH /api/v1/orders/{orderId}/seller-groups/{groupId}/shipping`
+
+**Auth**: `X-Service-Token` (Shipping → Buyer).
+
+**Request**
+```json
+{
+  "shipping_status": "in_transit",
+  "shipment_id": "shp_01H…",
+  "tracking_number": "BMK-1234567890",
+  "occurred_at": "2026-04-26T08:10:00Z"
+}
+```
+
+> **ADR-006**: `tracking_number` aquí es el tracking GLOBAL del pedido (`BMK-…`) — el que el comprador usa para seguir su pedido completo. CR3 (Seller) y CR4 (Payments) usan el `shipment_id` individual.
+
+`shipping_status`: `ready_for_pickup` | `picked_up` | `in_transit` | `out_for_delivery` | `delivered` | `failed_delivery` | `returned`.
+
+**Response 200**: el seller_group actualizado.
+
+### CR3. Notificar cambio de envío (Seller App)
+
+`PATCH /api/v1/sales-orders/{salesOrderId}/shipping-status`
+
+**Auth**: `X-Service-Token` (Shipping → Seller).
+
+**Request**
+```json
+{
+  "shipping_status": "delivered",
+  "shipment_id": "shp_01H…",
+  "occurred_at": "2026-04-28T16:20:00Z"
+}
+```
+**Response 200**.
+
+### CR4. Gatillar liquidación (Payments App)
+
+`POST /api/v1/internal/shipment-delivered`
+
+**Auth**: `X-Service-Token` (Shipping → Payments).
+
+**Request**
+```json
+{
+  "shipment_id": "shp_01H…",
+  "order_id": "ord_01H…",
+  "order_seller_group_id": "osg_01H…",
+  "sales_order_id": "sor_01H…",
+  "seller_profile_id": "slp_01H…",
+  "delivered_at": "2026-04-28T16:20:00Z"
+}
+```
+
+**Response 200**: `{ "received": true, "settlement_id": "set_01H…" }`.
+
+---
+
+## Apéndice B: diferencias entre versiones anteriores de la documentación (`documentacion-vieja`)
+
+Este apéndice resume todos los cambios que existían entre las dos versiones de `documentacion-vieja` antes de su unificación en `/documentacion/`.
 
 ### A. Clerk compartido
 
-| Aspecto | docs/ (`04-apartheid`) | documentacion-buyer/ | Decisión |
+| Aspecto | documentacion-vieja (04-apartheid) | documentacion-vieja (buyer) | Decisión |
 |---------|----------------------|---------------------|----------|
 | Proyectos Clerk | 4 proyectos independientes (buyer, seller, shipping, payments) | 4 proyectos independientes | **Un único proyecto Clerk** alojado en el Buyer App. Roles vía `publicMetadata`. Ver `05-usuarios.md`. |
 | Referencias en app headers | `Clerk: buyer.bicimarket`, `Clerk: seller.bicimarket`, etc. | Ídem | Reemplazadas por nota de Clerk compartido. |
 
 ### B. Buyer App — rutas
 
-| docs/ | documentacion-buyer/ | Decisión |
-|-------|---------------------|----------|
-| `GET /api/v1/buyer-profile/me` | `GET /api/v1/buyer/profile` | Usar `documentacion-buyer/` (prefijo `/buyer/`) |
+| documentacion-vieja (docs) | documentacion-vieja (buyer) | Decisión |
+|---------------------------|---------------------------|----------|
+| `GET /api/v1/buyer-profile/me` | `GET /api/v1/buyer/profile` | Usar `documentacion-vieja (buyer)` (prefijo `/buyer/`) |
 | `PUT /api/v1/buyer-profile/me` | `PATCH /api/v1/buyer/profile` | Usar `PATCH` (update parcial) |
-| `GET /api/v1/addresses`, `POST /api/v1/addresses` | `GET /api/v1/buyer/addresses`, `POST /api/v1/buyer/addresses` | Usar `documentacion-buyer/` |
+| `GET /api/v1/addresses`, `POST /api/v1/addresses` | `GET /api/v1/buyer/addresses`, `POST /api/v1/buyer/addresses` | Usar `documentacion-vieja (buyer)` |
 | `PUT /api/v1/addresses/{id}` | `PATCH /api/v1/buyer/addresses/{addressId}` | Usar `PATCH` |
 | `GET /api/v1/cart` | `GET /api/v1/buyer/cart` | Idéntico contenido |
-| `POST /api/v1/cart/items` | `POST /api/v1/buyer/cart` | Usar `documentacion-buyer/` |
-| `PATCH /api/v1/cart/items/{itemId}` | `PATCH /api/v1/buyer/cart/{itemId}` | Usar `documentacion-buyer/` |
-| `DELETE /api/v1/cart/items/{itemId}` | `DELETE /api/v1/buyer/cart/{itemId}` | Usar `documentacion-buyer/` |
+| `POST /api/v1/cart/items` | `POST /api/v1/buyer/cart` | Usar `documentacion-vieja (buyer)` |
+| `PATCH /api/v1/cart/items/{itemId}` | `PATCH /api/v1/buyer/cart/{itemId}` | Usar `documentacion-vieja (buyer)` |
+| `DELETE /api/v1/cart/items/{itemId}` | `DELETE /api/v1/buyer/cart/{itemId}` | Usar `documentacion-vieja (buyer)` |
 | `GET /api/v1/favorites` | `GET /api/v1/buyer/favorites` | Idéntico |
-| `POST /api/v1/orders` | `POST /api/v1/buyer/checkout` | Usar `documentacion-buyer/` — checkout unificado |
-| `GET /api/v1/orders` | `GET /api/v1/buyer/orders` | Usar `documentacion-buyer/` |
-| `GET /api/v1/orders/{id}` | `GET /api/v1/buyer/orders/{orderId}` | Usar `documentacion-buyer/` |
+| `POST /api/v1/orders` | `POST /api/v1/buyer/checkout` | Usar `documentacion-vieja (buyer)` — checkout unificado |
+| `GET /api/v1/orders` | `GET /api/v1/buyer/orders` | Usar `documentacion-vieja (buyer)` |
+| `GET /api/v1/orders/{id}` | `GET /api/v1/buyer/orders/{orderId}` | Usar `documentacion-vieja (buyer)` |
 
 ### C. Buyer App — checkout
 
-| Aspecto | docs/ | documentacion-buyer/ | Decisión |
-|---------|-------|---------------------|----------|
-| Body del request | `shipping_address_id`, `seller_groups[]` con `shipping_quote_id` | `shipping_address_id`, `returnUrl`, `notes` | Usar `documentacion-buyer/` — backend orquesta todo |
+| Aspecto | documentacion-vieja (docs) | documentacion-vieja (buyer) | Decisión |
+|---------|----------------------------|----------------------------|----------|
+| Body del request | `shipping_address_id`, `seller_groups[]` con `shipping_quote_id` | `shipping_address_id`, `returnUrl`, `notes` | Usar `documentacion-vieja (buyer)` — backend orquesta todo |
 | `Idempotency-Key` | Obligatorio | Obligatorio | Igual |
-| Response | Orden completa con `status=pending_payment` | `{ paymentUrl, orderId }` | Usar `documentacion-buyer/` |
-| Error codes | `409 CART_EMPTY`, `409 QUOTE_EXPIRED`, `422 ADDRESS_INVALID` | `400 CART_EMPTY`, `400 ADDRESS_NOT_FOUND` | Usar `documentacion-buyer/` |
+| Response | Orden completa con `status=pending_payment` | `{ paymentUrl, orderId }` | Usar `documentacion-vieja (buyer)` |
+| Error codes | `409 CART_EMPTY`, `409 QUOTE_EXPIRED`, `422 ADDRESS_INVALID` | `400 CART_EMPTY`, `400 ADDRESS_NOT_FOUND` | Usar `documentacion-vieja (buyer)` |
 
 ### D. Buyer App — cancelar orden
 
-| Aspecto | docs/ | documentacion-buyer/ | Decisión |
-|---------|-------|---------------------|----------|
-| Estados permitidos | Solo `pending_payment` | `pending_payment`, `paid`, `payment_failed` | Usar `documentacion-buyer/` |
-| Request body | `{ "reason" }` | Sin body | Usar `documentacion-buyer/` |
-| Error code | `409 CANNOT_CANCEL` | `409 ORDER_NOT_CANCELLABLE` | Usar `documentacion-buyer/` |
+| Aspecto | documentacion-vieja (docs) | documentacion-vieja (buyer) | Decisión |
+|---------|----------------------------|----------------------------|----------|
+| Estados permitidos | Solo `pending_payment` | `pending_payment`, `paid`, `payment_failed` | Usar `documentacion-vieja (buyer)` |
+| Request body | `{ "reason" }` | Sin body | Usar `documentacion-vieja (buyer)` |
+| Error code | `409 CANNOT_CANCEL` | `409 ORDER_NOT_CANCELLABLE` | Usar `documentacion-vieja (buyer)` |
 
 ### E. Buyer App — PATCH de shipping (server-to-server)
 
-| Aspecto | docs/ | documentacion-buyer/ | Decisión |
-|---------|-------|---------------------|----------|
-| Campos | `shipping_status`, `shipment_id`, `tracking_number`, `occurred_at` | `status`, `shipping_status` (opcional), `shipment_id`, `tracking_number`, `tracking_url` | Usar `documentacion-buyer/` — separa `status` de `shipping_status` |
-| `occurred_at` | Incluido | No incluido (Buyer lo registra internamente) | Usar `documentacion-buyer/` |
+| Aspecto | documentacion-vieja (docs) | documentacion-vieja (buyer) | Decisión |
+|---------|----------------------------|----------------------------|----------|
+| Campos | `shipping_status`, `shipment_id`, `tracking_number`, `occurred_at` | `status`, `shipping_status` (opcional), `shipment_id`, `tracking_number`, `tracking_url` | Usar `documentacion-vieja (buyer)` — separa `status` de `shipping_status` |
+| `occurred_at` | Incluido | No incluido (Buyer lo registra internamente) | Usar `documentacion-vieja (buyer)` |
 
 ### F. Seller → Buyer callback
 
-| Aspecto | docs/ | documentacion-buyer/ | Decisión |
-|---------|-------|---------------------|----------|
-| Endpoint | No existía | `PATCH /api/v1/orders/{id}/seller-groups/{g}/status` con `{ "status": "preparing" }` | Agregado desde `documentacion-buyer/`. Necesario para que el comprador vea que el vendedor aceptó. |
+| Aspecto | documentacion-vieja (docs) | documentacion-vieja (buyer) | Decisión |
+|---------|----------------------------|----------------------------|----------|
+| Endpoint | No existía | `PATCH /api/v1/orders/{id}/seller-groups/{g}/status` con `{ "status": "preparing" }` | Agregado desde `documentacion-vieja (buyer)`. Necesario para que el comprador vea que el vendedor aceptó. |
 
 ### G. Shipping App — cotizaciones
 
-| Aspecto | docs/ | documentacion-buyer/ | Decisión |
-|---------|-------|---------------------|----------|
-| Request | Individual por seller | Batch con `pickups[]` | Usar `documentacion-buyer/` — una llamada para todo el carrito |
+| Aspecto | documentacion-vieja (docs) | documentacion-vieja (buyer) | Decisión |
+|---------|----------------------------|----------------------------|----------|
+| Request | Individual por seller | Batch con `pickups[]` | Usar `documentacion-vieja (buyer)` — una llamada para todo el carrito |
 | Response | `{ id, cost_cents, carrier, ... }` por quote | `{ origins_count, discount_pct, total_gross_cents, total_net_cents }` | **Merge**: response con array `quotes[]` individuales + agregados `total_gross_cents` / `total_net_cents` |
 
 ### H. Payments App
 
-| Aspecto | docs/ | documentacion-buyer/ | Decisión |
-|---------|-------|---------------------|----------|
-| Secciones | P1 (Pagos), P2 (Reembolsos CRUD), P3 (Comprobantes), P4 (Liquidaciones), P5 (Payouts), P6 (Webhook), P7 (Interno) | P1 (Pagos), P2 (Comprobantes), P3 (Liquidaciones), P4 (Webhook + Interno) | Usar `docs/` (CRUD completo) |
-| Response envelope | `{ data: { ... }, public_key }` | Plano `{ id, ... }` | Usar `docs/` (`{ data }` envelope) |
-| `items_summary[].items` | Array anidado de productos | No existía | Usar `docs/` — alimenta la preferencia de MP |
-| `items_summary[].order_seller_group_id` | Incluido | No existía | Usar `docs/` — necesario para settlements |
-| `return_urls` | Opcional | — | Usar `docs/` |
-| `buyer_email` | Incluido | No existía | Usar `docs/` — necesario para MP `payer.email` |
-| Auth pattern | Tabla explícita service-token-OR-admin | Sin detalle | Usar `docs/` |
-| Refund CRUD (P2) | `GET /api/v1/refunds`, `GET /refunds/{id}`, `PATCH /refunds/{id}` | No existía | Usar `docs/` — necesario para dashboard admin |
-| Payouts CRUD (P5) | `GET /payouts`, `POST /payouts`, `GET /payouts/{id}`, `PATCH /payouts/{id}` | Solo `POST /payouts` | Usar `docs/` (CRUD completo) |
-| `PATCH /api/v1/settlements` (batch) | Incluido | No existía | Usar `docs/` — reemplaza `POST /v1/transfers` de MP |
-| Webhook response | `{ "ok": true }` | `{ "received": true }` | Usar `docs/` |
+| Aspecto | documentacion-vieja (docs) | documentacion-vieja (buyer) | Decisión |
+|---------|----------------------------|----------------------------|----------|
+| Secciones | P1 (Pagos), P2 (Reembolsos CRUD), P3 (Comprobantes), P4 (Liquidaciones), P5 (Payouts), P6 (Webhook), P7 (Interno) | P1 (Pagos), P2 (Comprobantes), P3 (Liquidaciones), P4 (Webhook + Interno) | Usar `documentacion-vieja (docs)` (CRUD completo) |
+| Response envelope | `{ data: { ... }, public_key }` | Plano `{ id, ... }` | Usar `documentacion-vieja (docs)` (`{ data }` envelope) |
+| `items_summary[].items` | Array anidado de productos | No existía | Usar `documentacion-vieja (docs)` — alimenta la preferencia de MP |
+| `items_summary[].order_seller_group_id` | Incluido | No existía | Usar `documentacion-vieja (docs)` — necesario para settlements |
+| `return_urls` | Opcional | — | Usar `documentacion-vieja (docs)` |
+| `buyer_email` | Incluido | No existía | Usar `documentacion-vieja (docs)` — necesario para MP `payer.email` |
+| Auth pattern | Tabla explícita service-token-OR-admin | Sin detalle | Usar `documentacion-vieja (docs)` |
+| Refund CRUD (P2) | `GET /api/v1/refunds`, `GET /refunds/{id}`, `PATCH /refunds/{id}` | No existía | Usar `documentacion-vieja (docs)` — necesario para dashboard admin |
+| Payouts CRUD (P5) | `GET /payouts`, `POST /payouts`, `GET /payouts/{id}`, `PATCH /payouts/{id}` | Solo `POST /payouts` | Usar `documentacion-vieja (docs)` (CRUD completo) |
+| `PATCH /api/v1/settlements` (batch) | Incluido | No existía | Usar `documentacion-vieja (docs)` — reemplaza `POST /v1/transfers` de MP |
+| Webhook response | `{ "ok": true }` | `{ "received": true }` | Usar `documentacion-vieja (docs)` |
 
 ### J. Integración MP — endpoints consumidos
 
-| Endpoint MP | docs/ | documentacion-buyer/ | Decisión |
-|-------------|-------|---------------------|----------|
+| Endpoint MP | documentacion-vieja (docs) | documentacion-vieja (buyer) | Decisión |
+|-------------|----------------------------|----------------------------|----------|
 | `POST /checkout/preferences` | Sí | Sí | Mantener |
 | `POST /v1/payments` | **Eliminado** | Sí | **Eliminado** — no se usa (usamos Checkout Pro) |
 | `GET /v1/payments/{id}` | Sí | Sí | Mantener |
@@ -1769,7 +1903,7 @@ Este apéndice resume todos los cambios que existían entre las dos versiones de
 
 ### K. Mapa de notificaciones
 
-| Notificación | docs/ | documentacion-buyer/ | Decisión |
-|-------------|-------|---------------------|----------|
-| Vendedor acepta orden (Seller → Buyer) | No incluida | Incluida | Agregada desde `documentacion-buyer/` |
+| Notificación | documentacion-vieja (docs) | documentacion-vieja (buyer) | Decisión |
+|-------------|----------------------------|----------------------------|----------|
+| Vendedor acepta orden (Seller → Buyer) | No incluida | Incluida | Agregada desde `documentacion-vieja (buyer)` |
 | Resto de notificaciones | Idéntico | Idéntico | Igual |

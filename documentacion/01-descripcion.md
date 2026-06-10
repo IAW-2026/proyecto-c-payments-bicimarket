@@ -180,8 +180,10 @@ sequenceDiagram
 #### Reglas
 
 - El operador logístico **no ve datos de pago**. Solo dirección, tracking, peso y bultos.
-- El campo `proof_of_delivery` (foto + firma + nota) es obligatorio para pasar a `delivered`.
+- El `delivery_proof` (foto + nota; firma opcional) es obligatorio para pasar a `delivered`.
 - Una vez `delivered`, Shipping le manda un `PATCH` a Buyer y a Seller, y un `POST /api/v1/internal/shipment-delivered` a Payments para disparar la transferencia al vendedor. Las tres son llamadas REST normales con `X-Service-Token`.
+
+> **ADR-006 — tracking global del pedido**: en órdenes multi-vendedor, los N shipments se agrupan en un `shipment_group` (1 por `order_id`). El comprador ve un tracking GLOBAL (`BMK-…`) del grupo; cada vendedor ve solo su tracking INDIVIDUAL (`TRK-AR-…`). Para single-vendor el grupo sigue existiendo pero global e individual apuntan al mismo pedido. Ver `04-modelo-de-datos.md §3.1` y `06-estados-y-diagramas.md §4`.
 
 ---
 

@@ -298,8 +298,27 @@ Fuente de verdad de: `shipment_id`, paquetes, eventos de tracking, operadores lo
 | `cost_cents` | int | |
 | `weight_grams_total` | int | |
 | `packages_snapshot` | json | array de paquetes con peso/dimensiones |
-| `expires_at` | timestamp | now + 60 min |
+| `idempotency_key` | string? unique | |
+| `expires_at` | timestamp | now + 60 min (calculado en aplicación) |
 | `created_at` | timestamp | |
+
+#### `shipment_groups` (ADR-006 — agrupación del pedido completo)
+Una orden del comprador con N vendedores genera N `shipments` (uno por seller). El `shipment_group` (1 por `order_id`) los agrupa y es dueño del tracking GLOBAL del pedido — el único que ve el comprador. Siempre existe un grupo, tenga 1 o N vendedores.
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id` | string PK | `grp_…` |
+| `order_id` | string unique | ref opaca a Buyer; 1 grupo por orden |
+| `buyer_profile_id` | string | |
+| `tracking_number` | string unique | tracking GLOBAL del pedido (`"BMK-" + random10`). El único que ve el comprador. |
+| `status` | enum (ver §6.4) | rollup persistido de los N shipments (se recomputa en cada cambio) |
+| `service_level` | enum | |
+| `shipping_address_snapshot` | json | |
+| `origins_count` | int | cantidad de vendedores del pedido |
+| `assigned_operator_clerk_user_id` | string? | operador dueño del pedido entero. null = disponible |
+| `created_at` / `updated_at` | timestamps | |
+
+Índices: `(buyer_profile_id)`, `(status)`. `order_id` y `tracking_number` son unique.
 
 #### `shipments`
 | Campo | Tipo | Notas |
@@ -310,10 +329,11 @@ Fuente de verdad de: `shipment_id`, paquetes, eventos de tracking, operadores lo
 | `sales_order_id` | string | ref opaca a Seller |
 | `seller_profile_id` | string | |
 | `buyer_profile_id` | string | |
+| `shipment_group_id` | string FK → shipment_groups | ADR-006: pedido al que pertenece. onDelete cascade. |
 | `shipping_quote_id` | string FK? → shipping_quotes | |
 | `carrier` | string | |
 | `service_level` | enum | |
-| `tracking_number` | string unique | |
+| `tracking_number` | string unique | tracking INDIVIDUAL del pickup (`"TRK-AR-" + random8`). Lo ve solo el vendedor de ese envío. |
 | `label_url` | string | |
 | `status` | enum (ver §6.4) | |
 | `weight_grams_total` | int | |
@@ -321,10 +341,11 @@ Fuente de verdad de: `shipment_id`, paquetes, eventos de tracking, operadores lo
 | `currency` | string | |
 | `shipping_address_snapshot` | json | |
 | `pickup_address_snapshot` | json | |
+| `idempotency_key` | string? unique | |
 | `shipped_at` / `delivered_at` | timestamps? | |
 | `created_at` / `updated_at` | timestamps | |
 
-Índices: `(order_id)`, `(sales_order_id)`, `(tracking_number)`, `(status)`.
+Índices: `(order_id)`, `(order_seller_group_id)`, `(sales_order_id)`, `(seller_profile_id)`, `(buyer_profile_id)`, `(shipment_group_id)`, `(tracking_number)`, `(status)`, `(created_at)`.
 
 #### `packages`
 | Campo | Tipo | Notas |
@@ -351,7 +372,8 @@ Fuente de verdad de: `shipment_id`, paquetes, eventos de tracking, operadores lo
 | Campo | Tipo | Notas |
 |---|---|---|
 | `id` | string PK | `dla_…` |
-| `shipment_id` | string FK | |
+| `shipment_group_id` | string? FK → shipment_groups | nivel real de asignación (el pedido completo) |
+| `shipment_id` | string? FK | nullable/legacy (asignaciones históricas por-envío) |
 | `operator_clerk_user_id` | string | |
 | `status` | enum `assigned` \| `accepted` \| `picked_up` \| `delivered` \| `reassigned` \| `cancelled` | |
 | `assigned_at` | timestamp | |
@@ -362,19 +384,32 @@ Fuente de verdad de: `shipment_id`, paquetes, eventos de tracking, operadores lo
 |---|---|---|
 | `id` | string PK | `prf_…` |
 | `shipment_id` | string FK | |
-| `proof_photo_url` | string | |
+| `proof_photo_url` | string | URL o `data:image/...;base64,…` |
 | `signature_image_url` | string? | |
 | `note` | string? | |
 | `delivered_at` | timestamp | |
 
+#### `shipment_status_history` (auditoría)
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id` | string PK | `ssh_…` |
+| `shipment_id` | string FK | |
+| `from_status` | string | |
+| `to_status` | string | |
+| `source` | string | `logistics` \| `admin` \| `system` |
+| `payload` | json? | |
+| `occurred_at` | timestamp | |
+
 ### 3.2 Diagrama
 ```mermaid
 erDiagram
+    shipment_groups ||--o{ shipments : "groups (1 per order)"
+    shipment_groups ||--o{ delivery_assignments : "assigned (whole order)"
     shipping_quotes ||--o{ shipments : "may convert to"
     shipments ||--o{ packages : has
     shipments ||--o{ tracking_events : tracked
-    shipments ||--o{ delivery_assignments : assigned
     shipments ||--|| delivery_proofs : "may have"
+    shipments ||--o{ shipment_status_history : audited
     logistics_operators ||--o{ delivery_assignments : performs
 ```
 
@@ -565,7 +600,8 @@ pending ─► paid (terminal)
 | Identidad de usuario | Todas las apps comparten el mismo Clerk | El Clerk compartido | Un usuario tiene una sola cuenta de Clerk. Su rol en cada app se determina por `publicMetadata`. |
 | Datos de perfil básicos (nombre, email) | Clerk compartido + perfil local en cada DB | Clerk compartido | El perfil local se crea en el primer login en cada app (provisioning perezoso): el backend lee los claims del JWT y hace upsert. |
 | `order_id` y estado visible de la orden | Buyer (verdad), Seller, Shipping, Payments | **Buyer App** | Buyer es dueña; las demás guardan ref opaca y reciben `PATCH` REST cuando hay cambios. |
-| `shipment_id` y estado de envío | Shipping (verdad), Buyer, Seller | **Shipping App** | Shipping notifica con `PATCH` REST; Buyer y Seller guardan `shipping_status` espejo. |
+| `shipment_id` y estado de envío | Shipping (verdad), Buyer, Seller | **Shipping App** | Shipping notifica con `PATCH` REST; Buyer y Seller guardan `shipping_status` espejo. ADR-006: a Buyer se le manda el tracking GLOBAL del pedido (`BMK-…`); a Seller, el `shipment_id` de su envío. |
+| Tracking del pedido (global) vs del envío (individual) | Shipping (verdad) | **Shipping App** | `shipment_groups.tracking_number` (`BMK-…`) lo ve el comprador; `shipments.tracking_number` (`TRK-AR-…`) lo ve cada vendedor para su propio envío. |
 | `payment_id` y estado de pago | Payments (verdad), Buyer, Seller | **Payments App** | Payments notifica con `PATCH` REST. |
 | `product_id`, precio, peso, dimensiones | Seller (verdad), Buyer (snapshots) | **Seller App** | Buyer guarda snapshots al agregar al carrito. `availability` solo confirma `status=active` (sin stock: el proyecto trabaja con stock ilimitado). |
 | Dirección de envío | Buyer (verdad), Shipping (snapshot), Seller (snapshot) | **Buyer App** | Snapshot al crear la orden; nunca se actualiza. |

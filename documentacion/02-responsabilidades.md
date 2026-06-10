@@ -139,11 +139,13 @@ La Seller App **se compromete a**:
 - `logistics_operators` — operadores propios o tercerizados.
 - `shipping_rates` — tarifario por peso/zona.
 - `shipping_quotes` — cotizaciones emitidas con TTL de 60 minutos.
+- `shipment_groups` — agrupación de envíos por pedido (1 por `order_id`), dueño del tracking GLOBAL (`BMK-…`). Ver ADR-006 en `04-modelo-de-datos.md §3.1`.
 - `shipments` — **fuente de verdad de `shipment_id`**, peso total, costo final, status.
 - `packages` — bultos del envío con `weight_grams`, `length_cm`, `width_cm`, `height_cm`, `label_url`.
 - `tracking_events` — historial de eventos.
-- `delivery_assignments` — asignación operador↔envío.
+- `delivery_assignments` — asignación operador↔envío (a nivel grupo para ADR-006).
 - `delivery_proofs` — fotos, firmas, notas en entrega.
+- `shipment_status_history` — auditoría de cambios de status.
 
 ### 5.2 Compromisos públicos
 
@@ -161,21 +163,24 @@ La Shipping App **se compromete a**:
 - **No procesa cobros del envío**. Reporta el `cost`; el cobro lo agrega Buyer App al total y lo cobra Payments.
 - **No conoce el monto de la orden**.
 
-### 5.4 Lo que consume
-
-Shipping App es mayormente reactiva. Solo consume:
+### 5.4 Lo que consume (llamadas salientes)
 
 | Consume de | Para qué                                          | Endpoint                                         |
 | ---------- | ------------------------------------------------- | ------------------------------------------------ |
 | Seller App | Validar `seller_profile_id` y dirección de retiro | `GET /api/v1/seller-profile/{id}/pickup-address` |
+| Buyer App  | Notificar cambio de estado de envío               | `PATCH /api/v1/orders/{id}/seller-groups/{g}/shipping` |
+| Seller App | Notificar cambio de estado de envío               | `PATCH /api/v1/sales-orders/{id}/shipping-status` |
+| Payments   | Gatillar liquidación al `delivered`               | `POST /api/v1/internal/shipment-delivered` |
 
 ### 5.5 Lo que recibe (REST entrante de otras apps)
 
-| De         | Endpoint                          | Acción      |
-| ---------- | --------------------------------- | ----------- |
-| Seller App | `POST /api/v1/shipments`          | Crea envío. |
-| Buyer App  | `POST /api/v1/shipping-quotes`    | Cotiza.     |
-| Buyer App  | `GET /api/v1/shipments?orderId=X` | Consulta.   |
+| De         | Endpoint                                        | Acción                           |
+| ---------- | ----------------------------------------------- | -------------------------------- |
+| Buyer App  | `POST /api/v1/shipping-quotes`                  | Cotiza.                          |
+| Buyer App  | `GET /api/v1/shipments?orderId=X`               | Consulta envíos de una orden.    |
+| Buyer App  | `GET /api/v1/shipments/{id}/tracking-events`    | Tracking público.                |
+| Seller App | `POST /api/v1/shipments`                        | Crea envío.                      |
+| Seller App | `POST /api/v1/shipments/{id}/packages`          | Agrega paquete a un envío.       |
 
 ---
 

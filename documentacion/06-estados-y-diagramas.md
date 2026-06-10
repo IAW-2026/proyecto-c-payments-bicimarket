@@ -81,6 +81,8 @@ stateDiagram-v2
     ready_for_pickup --> picked_up: tracking_event picked_up
     picked_up --> in_transit: tracking_event in_transit
     in_transit --> out_for_delivery: tracking_event out_for_delivery
+    in_transit --> delivered: POST /deliver con prueba
+    in_transit --> failed_delivery: tracking_event failed_delivery
     out_for_delivery --> delivered: POST /deliver con prueba
     out_for_delivery --> failed_delivery: tracking_event failed_delivery
     failed_delivery --> in_transit: reintento
@@ -227,3 +229,24 @@ Toda app que reciba un cambio de estado debe **rechazar transiciones inválidas 
 | in_transit       | ❌               | ❌        | ❌         | ✅               | ✅        | ✅              | ❌       |
 | out_for_delivery | ❌               | ❌        | ❌         | ❌               | ✅        | ✅              | ❌       |
 | failed_delivery  | ❌               | ❌        | ✅         | ❌               | ❌        | ❌              | ✅       |
+| delivered        | ❌               | ❌        | ❌         | ❌               | ❌        | ❌              | ❌       |
+| returned         | ❌               | ❌        | ❌         | ❌               | ❌        | ❌              | ❌       |
+
+---
+
+## 6. Estado agregado del pedido (ADR-006)
+
+Una orden con N vendedores genera N `Shipment` agrupados por un **`shipment_group`** (1 por `order_id`). La máquina de estado de arriba sigue siendo **por shipment** — cada pickup transiciona independiente. El estado del pedido se **persiste** en `shipment_group.status` como rollup de los N shipments, recomputado dentro de la misma transacción que cambia cualquier shipment (`recomputeGroupStatus`):
+
+1. Todos `delivered` → grupo `delivered`.
+2. Alguno `failed_delivery` → grupo `failed_delivery` (prioridad de atención).
+3. Alguno `returned` → grupo `returned`.
+4. Si no, el estado **menos avanzado** (el bottleneck del pedido).
+
+### 6.1 Entrega parcial
+
+Cuando el grupo tiene al menos un envío `delivered` Y al menos otro `failed_delivery`/`returned`, el rollup persiste `failed_delivery`/`returned` por prioridad, pero la UI muestra un badge **"Entrega parcial"** (`isPartialDelivery`). No se agrega ningún estado nuevo al enum ni a la máquina. La liquidación al vendedor es **por envío** (se gatilla cuando ese envío se entrega), así que un envío entregado dentro de un grupo parcial igual liquida.
+
+### 6.2 Evento "todos retirados" (multi-vendedor)
+
+Cuando se marca el último pickup de un pedido como `picked_up` y todos los demás del mismo grupo ya están en `picked_up` o más adelante, el handler de tracking-events emite una notificación derivada a Buyer App. Aplica solo cuando el grupo tiene >1 shipment.
