@@ -13,6 +13,7 @@
     "lint": "eslint",
     "openapi:validate": "swagger-cli validate docs/openapi.yaml",
     "seed": "npx tsx prisma/seed.ts",
+    "db:reset": "npx tsx prisma/reset.ts",
     "seed:reset": "npx prisma db push --force-reset && npx tsx prisma/seed.ts"
   },
   "prisma": {

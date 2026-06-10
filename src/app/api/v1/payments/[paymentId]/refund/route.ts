@@ -51,6 +51,12 @@ export async function POST(
       })
     }
 
+    if (!payment.gateway_reference) {
+      return badRequest('NO_GATEWAY_REFERENCE', 'Cannot refund: payment has no Mercado Pago gateway reference', {
+        paymentId,
+      })
+    }
+
     const refund = await prisma.refund.create({
       data: {
         payment_id: paymentId,
@@ -63,61 +69,62 @@ export async function POST(
       },
     })
 
-    if (payment.gateway_reference) {
-      try {
-        const mpResult = await mpService.createRefund(payment.gateway_reference, amount_cents)
+    let mpResult: any
+    try {
+      mpResult = await mpService.createRefund(payment.gateway_reference, amount_cents)
+    } catch (mpErr) {
+      const mpMessage = mpErr instanceof Error ? mpErr.message : (mpErr as any)?.response?.data?.message || String(mpErr)
+      console.error('MP refund failed:', mpErr, 'Message:', mpMessage)
+      await prisma.refund.update({
+        where: { id: refund.id },
+        data: { status: 'failed' },
+      })
+      return badRequest('MP_REFUND_FAILED', `MP refund failed: ${mpMessage}`, {
+        gateway_reference: payment.gateway_reference,
+        mp_error: mpMessage,
+      })
+    }
 
-        await prisma.refund.update({
-          where: { id: refund.id },
+    await prisma.refund.update({
+      where: { id: refund.id },
+      data: {
+        gateway_reference: mpResult.id,
+        status: mpResult.status === 'approved' ? 'approved' : 'pending',
+      },
+    })
+
+    if (mpResult.status === 'approved') {
+      const totalRefunded = await prisma.refund.aggregate({
+        where: { payment_id: paymentId, status: 'approved' },
+        _sum: { amount_cents: true },
+      })
+      const totalRefundedAmount = totalRefunded._sum.amount_cents || amount_cents
+      const isFullyRefunded = totalRefundedAmount >= payment.amount_cents
+
+      await prisma.$transaction(async (tx) => {
+        if (isFullyRefunded) {
+          await tx.payment.update({
+            where: { id: paymentId },
+            data: { status: 'refunded' },
+          })
+        }
+        await tx.paymentStatusHistory.create({
           data: {
-            gateway_reference: mpResult.id,
-            status: mpResult.status === 'approved' ? 'approved' : 'pending',
+            payment_id: paymentId,
+            from_status: 'approved',
+            to_status: isFullyRefunded ? 'refunded' : 'approved',
+            changed_by: 'system',
+            reason: `Refund of ${amount_cents} cents processed via MP (${isFullyRefunded ? 'full' : 'partial'})`,
           },
         })
+      })
 
-        if (mpResult.status === 'approved') {
-          const totalRefunded = await prisma.refund.aggregate({
-            where: { payment_id: paymentId, status: 'approved' },
-            _sum: { amount_cents: true },
-          })
-          const totalRefundedAmount = totalRefunded._sum.amount_cents || amount_cents
-          const isFullyRefunded = totalRefundedAmount >= payment.amount_cents
-
-          await prisma.$transaction(async (tx) => {
-            if (isFullyRefunded) {
-              await tx.payment.update({
-                where: { id: paymentId },
-                data: { status: 'refunded' },
-              })
-            }
-            await tx.paymentStatusHistory.create({
-              data: {
-                payment_id: paymentId,
-                from_status: 'approved',
-                to_status: isFullyRefunded ? 'refunded' : 'approved',
-                changed_by: 'system',
-                reason: `Refund of ${amount_cents} cents processed via MP (${isFullyRefunded ? 'full' : 'partial'})`,
-              },
-            })
-          })
-
-          // try {
-          //   await notifyBuyerOrderStatus(payment.order_id, 'refunded', payment.id)
-          // } catch (notifyErr) {
-          //   console.error('Failed to notify buyer of refund:', notifyErr)
-          // }
+      if (isFullyRefunded) {
+        try {
+          await notifyBuyerOrderStatus(payment.order_id, 'refunded', payment.id)
+        } catch (notifyErr) {
+          console.error('Failed to notify buyer of refund:', notifyErr)
         }
-      } catch (mpErr) {
-        const mpMessage = mpErr instanceof Error ? mpErr.message : (mpErr as any)?.response?.data?.message || String(mpErr)
-        console.error('MP refund failed:', mpErr, 'Message:', mpMessage)
-        await prisma.refund.update({
-          where: { id: refund.id },
-          data: { status: 'failed' },
-        })
-        return badRequest('MP_REFUND_FAILED', `MP refund failed: ${mpMessage}`, {
-          gateway_reference: payment.gateway_reference,
-          mp_error: mpMessage,
-        })
       }
     }
 

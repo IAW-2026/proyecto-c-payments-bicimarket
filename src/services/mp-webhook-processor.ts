@@ -8,6 +8,7 @@ function mapMpStatusToPaymentStatus(status?: string) {
   if (s === 'approved') return 'approved'
   if (s === 'cancelled' || s === 'cancelled_by_user' || s === 'cancelled_by_seller') return 'cancelled'
   if (s === 'refunded' || s === 'charged_back') return 'refunded'
+  if (s === 'rejected') return 'rejected'
   if (s === 'in_process' || s === 'pending') return 'pending'
   return 'pending'
 }
@@ -139,33 +140,41 @@ export async function processMpWebhookEvent(mpEventId: string) {
         const lastCard4 = mpDetails.card?.last_four_digits || mpDetails.card?.last_four || mpDetails.last_four_digits || mpDetails.last_four
         if (lastCard4) updateData.card_last4 = String(lastCard4)
 
-        // Set timestamps based on status
-        if (paymentStatus === 'approved') {
-          updateData.status = 'approved'
-          updateData.approved_at = mpDetails.date_approved ? new Date(mpDetails.date_approved) : new Date()
-        } else if (paymentStatus === 'cancelled') {
-          updateData.status = 'cancelled'
-          updateData.cancelled_at = new Date()
-        } else if (paymentStatus === 'refunded') {
-          updateData.status = 'refunded'
-        } else if (paymentStatus === 'pending') {
-          updateData.status = 'pending'
-        }
+        // Skip status update & transition validation if status hasn't changed
+        // (MP may re-notify for an in_process → pending payment we already know about)
+        const statusSame = paymentStatus === payment.status
+        if (!statusSame) {
+          if (paymentStatus === 'approved') {
+            updateData.status = 'approved'
+            updateData.approved_at = mpDetails.date_approved ? new Date(mpDetails.date_approved) : new Date()
+          } else if (paymentStatus === 'cancelled') {
+            updateData.status = 'cancelled'
+            updateData.cancelled_at = new Date()
+          } else if (paymentStatus === 'refunded') {
+            updateData.status = 'refunded'
+          } else if (paymentStatus === 'rejected') {
+            updateData.status = 'rejected'
+          }
 
-        // Validate transition via state machine before applying
-        try {
-          validatePaymentTransition(payment.status as any, updateData.status as any)
-        } catch {
-          console.warn(`[MP Processor] Skipping invalid transition: ${payment.status} → ${updateData.status} for payment ${payment.id}`)
-          return
+          // Validate transition via state machine before applying
+          try {
+            validatePaymentTransition(payment.status as any, updateData.status as any)
+          } catch (transitionErr) {
+            const errMsg = transitionErr instanceof Error ? transitionErr.message : String(transitionErr)
+            console.warn(`[MP Processor] Invalid transition: ${payment.status} → ${updateData.status} for payment ${payment.id}. Marking event failed.`)
+            await prisma.mpWebhookEvent.update({ where: { mp_event_id: mpEventId }, data: { status: 'failed', last_error: errMsg } })
+            return
+          }
         }
 
         await prisma.payment.update({ where: { id: payment.id }, data: updateData })
 
-        // Add status history
-        try {
-          await prisma.paymentStatusHistory.create({ data: { payment_id: payment.id, from_status: payment.status, to_status: updateData.status, changed_by: 'mercadopago-webhook' } })
-        } catch {}
+        // Add status history (only if status actually changed — updateData.status is undefined when same)
+        if (!statusSame) {
+          try {
+            await prisma.paymentStatusHistory.create({ data: { payment_id: payment.id, from_status: payment.status, to_status: updateData.status, changed_by: 'mercadopago-webhook' } })
+          } catch {}
+        }
 
         // Create receipt if approved and we have an amount
         if (paymentStatus === 'approved') {
@@ -179,20 +188,36 @@ export async function processMpWebhookEvent(mpEventId: string) {
           }
         }
 
-        // // ── Inter-app notifications (commented out for presentation) ──
-        // const previousStatus = payment.status as string
-        // const newStatus = updateData.status as string
-        // if (previousStatus !== 'approved' && newStatus === 'approved') {
-        //   try { await notifyBuyerOrderStatus(payment.order_id, 'paid', payment.id) } catch {}
-        //   try {
-        //     const itemsSummary = payment.items_summary as Array<Record<string, unknown>> | null
-        //     if (itemsSummary && Array.isArray(itemsSummary)) {
-        //       for (const seller of itemsSummary) {
-        //         await createSellerSalesOrder(seller.seller_profile_id as string, { order_id: payment.order_id })
-        //       }
-        //     }
-        //   } catch {}
-        // }
+        // ── Inter-app notifications ──
+        if (payment.status !== 'approved' && paymentStatus === 'approved') {
+          try { await notifyBuyerOrderStatus(payment.order_id, 'paid', payment.id) } catch {}
+          try {
+            const itemsSummary = payment.items_summary as Array<Record<string, any>> | null
+            if (itemsSummary && Array.isArray(itemsSummary)) {
+              for (const seller of itemsSummary) {
+                const sellerItems = (seller.items as Array<Record<string, any>>) || []
+                await createSellerSalesOrder(seller.seller_profile_id as string, {
+                  order_id: payment.order_id,
+                  order_seller_group_id: seller.order_seller_group_id as string,
+                  buyer_profile_id: payment.buyer_profile_id,
+                  buyer_clerk_user_id: payment.buyer_clerk_user_id,
+                  items: sellerItems.map((it) => ({
+                    product_id: it.product_id,
+                    product_name_snapshot: it.product_name_snapshot,
+                    unit_price_cents: it.unit_price_cents,
+                    quantity: it.quantity,
+                  })),
+                  items_subtotal_cents: seller.subtotal_cents as number,
+                  shipping_cost_cents: seller.shipping_cost_cents as number,
+                  total_cents: (seller.subtotal_cents as number) + (seller.shipping_cost_cents as number),
+                  currency: payment.currency,
+                  shipping_address_snapshot: {},
+                  payment_id: payment.id,
+                })
+              }
+            }
+          } catch {}
+        }
       } catch (pErr) {
         console.error('[MP Processor] Failed updating payment', pErr)
       }

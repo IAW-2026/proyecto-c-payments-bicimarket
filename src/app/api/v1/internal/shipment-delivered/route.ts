@@ -64,11 +64,11 @@ export async function POST(req: Request) {
       })
     }
 
-    // try {
-    //   await notifySellerPaymentStatus(sales_order_id, 'paid', settlement.id)
-    // } catch (err) {
-    //   console.error('Failed to notify seller of payment status:', err)
-    // }
+    try {
+      await notifySellerPaymentStatus(sales_order_id, 'settled', settlement.id)
+    } catch (err) {
+      console.error('Failed to notify seller of payment status:', err)
+    }
 
     return NextResponse.json({ received: true, settlement_id: settlement.id }, { status: 200 })
   } catch (err) {
