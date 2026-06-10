@@ -16,7 +16,7 @@
 - **Snapshots**: cuando un campo viene de otra app (precio, dirección, nombre del producto), se guarda con sufijo `_snapshot` y **nunca se actualiza** una vez guardado.
 - **Referencias cruzadas**: los IDs de otras apps se guardan como **string opaco**, sin foreign key. La integridad la mantiene el ciclo de vida del negocio.
 - **Auditoría**: cualquier cambio de estado relevante (`order.status`, `shipment.status`, `payment.status`, `settlement.status`) deja registro en una tabla `*_status_history` (ver §6).
-- **Identidad**: cada app tiene su propio Clerk. `clerk_user_id` en cada perfil refiere al Clerk **de esa app**. No existe correlación entre Clerks: si un humano opera en varias apps, sus cuentas son independientes. Las apps no mantienen tablas de mapeo entre identidades.
+- **Identidad**: todas las apps comparten el mismo proyecto de Clerk. El `clerk_user_id` es el mismo para un usuario dado sin importar en qué app lo lea. Un humano puede tener roles en múltiples apps (comprador y vendedor, por ejemplo) usando la misma cuenta de Clerk; el rol se determina por `publicMetadata`.
 
 ---
 
@@ -52,7 +52,7 @@ Fuente de verdad de: `order_id`, carrito, direcciones del comprador, perfil de c
 |---|---|---|
 | `id` | string PK | `crt_…` |
 | `buyer_profile_id` | string FK unique | un cart activo por buyer |
-| `status` | enum `active` \| `converted` \| `abandoned` | |
+| `status` | enum `active` \| `converted` | |
 | `created_at` / `updated_at` | timestamps | |
 
 #### `cart_items`
@@ -180,7 +180,7 @@ Fuente de verdad de: catálogo (`product`, precio, peso), perfil de vendedor, su
 | `description` | text | |
 | `brand` | string | |
 | `model` | string | |
-| `category` | enum `mtb` \| `road` \| `urban` \| `kids` \| `bmx` \| `parts` \| `accessories` | |
+| `category` | enum `mtb` \| `road` \| `urban` \| `kids` \| `bmx` \| `parts` \| `accessories` \| `indumentaria` | |
 | `condition` | enum `new` \| `used_like_new` \| `used_good` \| `used_fair` | |
 | `price_cents` | int | |
 | `currency` | string | |
@@ -562,8 +562,8 @@ pending ─► paid (terminal)
 
 | Dato | Apps que lo tienen | Fuente de verdad | Estrategia |
 |---|---|---|---|
-| Identidad de usuario | Cada app tiene su Clerk | El Clerk de cada app | Cada Clerk es una base de usuarios independiente. No hay sync ni mapeo entre Clerks: si un humano opera en varias apps, sus cuentas son cuentas separadas. El sistema no las correlaciona. |
-| Datos de perfil básicos (nombre, email) | Clerk de cada app + perfil local | Clerk de esa app | El perfil local se crea en el primer login (provisioning perezoso): el backend lee los claims del JWT y guarda el snapshot. Las actualizaciones siguen con cada login (refresh on demand). |
+| Identidad de usuario | Todas las apps comparten el mismo Clerk | El Clerk compartido | Un usuario tiene una sola cuenta de Clerk. Su rol en cada app se determina por `publicMetadata`. |
+| Datos de perfil básicos (nombre, email) | Clerk compartido + perfil local en cada DB | Clerk compartido | El perfil local se crea en el primer login en cada app (provisioning perezoso): el backend lee los claims del JWT y hace upsert. |
 | `order_id` y estado visible de la orden | Buyer (verdad), Seller, Shipping, Payments | **Buyer App** | Buyer es dueña; las demás guardan ref opaca y reciben `PATCH` REST cuando hay cambios. |
 | `shipment_id` y estado de envío | Shipping (verdad), Buyer, Seller | **Shipping App** | Shipping notifica con `PATCH` REST; Buyer y Seller guardan `shipping_status` espejo. |
 | `payment_id` y estado de pago | Payments (verdad), Buyer, Seller | **Payments App** | Payments notifica con `PATCH` REST. |
@@ -573,64 +573,69 @@ pending ─► paid (terminal)
 
 ---
 
-## Apéndice: diferencias con `old-docs/` (Payments App)
+## Apéndice: Cambios consolidados
 
 ### A. Reglas comunes (§0) — IDs
 
-| old-docs | actual | Por qué en Payments |
-|----------|--------|---------------------|
-| `String @id @default(cuid())` con prefijo generado en aplicación | `String @id @default(cuid())` sobrescrito vía extensión de Prisma (`$extends`) que llama a `generateId(model)` de `src/lib/id-generator.ts` | El middleware `$extends` en `src/lib/prisma.ts` intercepta cada `create` y reemplaza el `id` generado por `cuid()` con un ID prefijado (`pay_`, `set_`, etc.). Esto garantiza IDs legibles estilo Stripe sin depender del `@default` del schema. El `@default(cuid())` queda como fallback por si la extensión no se ejecuta. |
+| Anterior | Actual | Por qué |
+|----------|--------|---------|
+| `String @id @default(cuid())` con prefijo generado en aplicación | `String @id @default(cuid())` sobrescrito vía extensión de Prisma (`$extends`) que llama a `generateId(model)` de `src/lib/id-generator.ts` | El middleware `$extends` en `src/lib/prisma.ts` intercepta cada `create` y reemplaza el `id` generado por `cuid()` con un ID prefijado (`pay_`, `set_`, etc.). Esto garantiza IDs legibles estilo Stripe sin depender del `@default` del schema. |
 
-### B. Payments App (§4) — Tabla `payments`
+### B. Regla de identidad (§0)
 
-| Campo | old-docs | actual | Por qué en Payments |
-|-------|----------|--------|---------------------|
+- **Anterior**: "cada app tiene su propio Clerk. `clerk_user_id` en cada perfil refiere al Clerk **de esa app**. No existe correlación entre Clerks."
+- **Actual**: "todas las apps comparten el mismo proyecto de Clerk. El `clerk_user_id` es el mismo para un usuario dado sin importar en qué app lo lea."
+
+### C. Buyer App — `carts.status`
+
+- **Anterior**: `enum active | converted | abandoned`
+- **Actual**: `enum active | converted`
+- **Por qué**: detectar carritos abandonados requería un cron o webhook que estaba fuera del alcance. Sin mecanismo que transite a `abandoned`, el estado era dead code.
+
+### D. Seller App — `products.category`
+
+- **Anterior**: `mtb | road | urban | kids | bmx | parts | accessories`
+- **Actual**: agrega `indumentaria`.
+
+### E. Payments App — Tabla `payments`
+
+| Campo | Anterior | Actual | Por qué |
+|-------|----------|--------|---------|
 | `checkout_url` | No existía | `string?` — URL de MP (`init_point`) | Se guarda post-creación de preferencia para devolver al frontend en respuestas de idempotencia. |
 | `preference_id` | No existía | `string?` — ID de preferencia de MP | Necesario para renderizar Wallet Brick en el frontend. |
-| `items_summary` | No existía | `json?` — `[{ seller_profile_id, subtotal_cents, shipping_cost_cents, order_seller_group_id, items[] }]` | Se persiste el payload completo del request para usarlo al calcular settlements cuando llega `shipment-delivered`. Sin `items_summary` no sabríamos cómo desglosar el pago por seller. |
-| `idempotency_key` | `string unique` (sí existía) | `string unique` | Sin cambios. La key se guarda en el Payment para idempotencia permanente. |
+| `items_summary` | No existía | `json?` — `[{ seller_profile_id, subtotal_cents, shipping_cost_cents, order_seller_group_id, items[] }]` | Se persiste el payload completo del request para usarlo al calcular settlements cuando llega `shipment-delivered`. |
+| `idempotency_key` | `string unique` | `string unique` | Sin cambios. |
 | `method` | `enum?` | `enum` (mismo) | Sin cambios — se llena post-aprobación desde webhook. |
-| `card_last4` | No existía | `string?` | Se llena post-aprobación desde respuesta de MP (últimos 4 dígitos). |
+| `card_last4` | No existía | `string?` | Se llena post-aprobación desde respuesta de MP. |
 
-### C. Payments App (§4) — Nuevas tablas de auditoría
+### F. Payments App — Nuevas tablas de auditoría
 
-| Tabla | old-docs | actual | Por qué en Payments |
-|-------|----------|--------|---------------------|
-| `PaymentStatusHistory` | No existía | Modelo completo con `from_status`, `to_status`, `source`, `payload`, `occurred_at` | Auditoría de cambios de estado requerida para trazabilidad. Consistente con el resto del sistema (ver §0: "cualquier cambio de estado relevante deja registro en `*_status_history`"). |
+| Tabla | Anterior | Actual | Por qué |
+|-------|----------|--------|---------|
+| `PaymentStatusHistory` | No existía | Modelo completo con `from_status`, `to_status`, `source`, `payload`, `occurred_at` | Auditoría de cambios de estado requerida para trazabilidad. |
 | `SettlementStatusHistory` | No existía | Idem | Idem. |
 | `RefundStatusHistory` | No existía | Idem | Idem. |
 
-### D. Payments App (§4) — Tablas modificadas
+### G. Payments App — Tablas modificadas
 
 #### `receipts`
-
-| Campo | old-docs | actual | Por qué en Payments |
-|-------|----------|--------|---------------------|
-| `idempotency_key` | No existía | `string unique?` | Idempotencia permanente en creación de comprobantes. |
+- **Nuevo**: `idempotency_key` (`string unique?`) — Idempotencia permanente.
 
 #### `refunds`
-
-| Campo | old-docs | actual | Por qué en Payments |
-|-------|----------|--------|---------------------|
-| `idempotency_key` | No existía | `string unique?` | Idempotencia permanente en reembolsos. |
+- **Nuevo**: `idempotency_key` (`string unique?`) — Idempotencia permanente.
 
 #### `payouts`
-
-| Campo | old-docs | actual | Por qué en Payments |
-|-------|----------|--------|---------------------|
-| `idempotency_key` | No existía | `string unique?` | Idempotencia permanente en transferencias. |
+- **Nuevo**: `idempotency_key` (`string unique?`) — Idempotencia permanente.
 
 #### `settlements`
+- **Anterior**: Sin relación a `payouts`.
+- **Actual**: `payouts Payout[]` — un settlement puede tener múltiples intentos de payout.
 
-| old-docs | actual | Por qué en Payments |
-|----------|--------|---------------------|
-| Sin relación a `payouts` | `payouts Payout[]` — un settlement puede tener múltiples intentos de payout | Trazabilidad: si un payout falla y se reintenta, todos los intentos quedan vinculados al mismo settlement. |
-
-### E. Sin cambios en Payments
+### H. Sin cambios
 
 - `payment_attempts` — idéntico.
 - `mp_webhook_events` — idéntico.
 - `outbound_calls_log` — idéntico.
-- Diagrama ER (§4.2) — idéntico.
-- Máquinas de estado (§5.5, §5.6) — idénticas.
-- Datos duplicados (§6) — idéntico, Payments no cambió su rol en la matriz.
+- Diagramas ER — idénticos.
+- Máquinas de estado (§5) — idénticas.
+- Datos duplicados (§6) — idéntico salvo la fila de identidad actualizada.

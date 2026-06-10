@@ -31,19 +31,19 @@ El sistema se piensa para escalar a **órdenes multi-vendedor**: una compra pued
 | Shipping App | Logística, dueña de los `shipments`, paquetes y eventos de tracking                  | Enrique Seitz | Operadores logísticos, envíos, paquetes (con peso y dimensiones), cotizaciones, asignaciones, tracking |
 | Payments App | Pasarela y liquidaciones, integra Mercado Pago                                       | Rocco Paoloni | Pagos, intentos, comprobantes, liquidaciones por vendedor, transferencias                              |
 
-> **Importante**: cada app tiene **su propio proyecto en Clerk** (cuatro Clerks distintos). Los usuarios se autentican en la app que están usando; las apps se hablan entre sí por REST con `X-Service-Token`. No hay correlación de identidad entre Clerks. Ver `05-usuarios.md`.
+> **Importante**: todas las apps comparten **un único proyecto de Clerk** (el del Buyer App). Los usuarios tienen una sola cuenta de Clerk; su rol en cada app se determina por `publicMetadata`. Las apps se hablan entre sí por REST con `X-Service-Token`. Ver `05-usuarios.md`.
 
 ## 3. Actores
 
-| Actor              | Apps donde se loguea                                   | Clerk(s) que usa                                 |
-| ------------------ | ------------------------------------------------------ | ------------------------------------------------ |
-| Comprador          | Buyer App                                              | Clerk-Buyer (rol `buyer`)                        |
-| Vendedor           | Seller App                                             | Clerk-Seller (rol `seller`)                      |
-| Operador logístico | Shipping App                                           | Clerk-Shipping (rol `logistics`)                 |
-| Admin de Payments  | Payments App (admin UI: refunds, payouts, settlements) | Clerk-Payments (admin obligatorio)               |
-| Admin transversal  | Las apps donde necesite operar                         | Clerk respectivo con `publicMetadata.admin=true` |
+| Actor              | Apps donde se loguea                                   | Rol en Clerk                                      |
+| ------------------ | ------------------------------------------------------ | ------------------------------------------------- |
+| Comprador          | Buyer App                                              | `publicMetadata.role = "buyer"`                   |
+| Vendedor           | Seller App                                             | `publicMetadata.role = "seller"`                  |
+| Operador logístico | Shipping App                                           | `publicMetadata.role = "logistics"`               |
+| Admin de Payments  | Payments App (admin UI: refunds, payouts, settlements) | `publicMetadata.admin = true` (obligatorio)       |
+| Admin transversal  | Las apps donde necesite operar                         | `publicMetadata.admin = true`                     |
 
-Un humano que opera en varias apps tiene cuentas separadas en cada Clerk. El sistema **no las correlaciona**: si querés ver tus comprobantes vas a Buyer App; si querés ver tus liquidaciones vas a Seller App. Esas vistas las renderizan las apps fuente consumiendo Payments por REST.
+Un humano que opera en varias apps usa **la misma cuenta de Clerk**. Un usuario puede tener múltiples roles activos simultáneamente (ej.: comprador y vendedor). Si querés ver tus comprobantes vas a Buyer App; si querés ver tus liquidaciones vas a Seller App. Esas vistas las renderizan las apps fuente consumiendo Payments por REST.
 
 ## 4. Flujos principales
 
@@ -71,17 +71,17 @@ sequenceDiagram
     participant P as Payments App
     participant MP as Mercado Pago
 
-    C->>B: Agrega ítems al carrito (POST /api/v1/cart/items)
+    C->>B: Agrega ítems al carrito (POST /api/v1/buyer/cart)
     B->>S: GET /api/v1/products/{id}/availability (por cada item)
     S-->>B: status=active + precio + seller_profile_id + weight_grams
     note over B: Carrito guarda snapshots y agrupa items por seller
     C->>B: Inicia checkout con shipping_address_id
-    B->>SH: POST /api/v1/shipping-quotes (por cada seller)
+    B->>SH: POST /api/v1/shipping-quotes (todos los sellers en un request)
     SH-->>B: cost, estimated_days, packages_count, total_weight
     B->>P: POST /api/v1/payments (idempotency-key, total = items + envíos)
-    P->>MP: POST /v1/payments (intent)
-    MP-->>P: payment_id + checkout_url
-    P-->>B: payment.id, checkout_url, status=pending
+    P->>MP: POST /checkout/preferences (SDK)
+    MP-->>P: preference_id + checkout_url
+    P-->>B: payment.id, checkout_url, preference_id, public_key, status=pending
     note over B: Buyer App crea order con status=pending_payment<br/>+ una order_seller_group por vendedor
     B-->>C: Redirige a checkout_url
     C->>MP: Completa el pago
@@ -119,11 +119,11 @@ sequenceDiagram
     autonumber
     actor V as Vendedor
     participant S as Seller App
-    participant CL as Clerk-Seller
+    participant CL as Clerk
     participant ST as Storage (S3/Supabase)
 
     V->>CL: Login (email + password)
-    CL-->>V: JWT con roles=["seller"]
+    CL-->>V: JWT con publicMetadata.role="seller"
     V->>S: POST /api/v1/seller-profile/me (alta perfil si es primera vez)
     S-->>V: seller_profile creado (status=pending_review)
     V->>S: POST /api/v1/products (title, brand, model, price, weight_grams, condition)
@@ -250,7 +250,7 @@ flowchart LR
 
 Todas las flechas entre nuestras apps son **llamadas REST sobre HTTP** usando los verbos clásicos `GET`, `POST`, `PUT`, `PATCH`, `DELETE`. La autenticación cambia según quién la dispara:
 
-- Cuando la dispara la UI propia de la app: `Authorization: Bearer <JWT-de-Clerk-de-esa-app>`.
+- Cuando la dispara la UI propia de la app: `Authorization: Bearer <JWT-de-Clerk>` (mismo Clerk compartido).
 - Cuando la dispara el backend de una app contra otra (consultas o notificaciones): `X-Service-Token: <secret-del-par>`.
 
 La única excepción —porque no podemos cambiarla— es el **webhook de Mercado Pago → Payments** (`POST /webhooks/mercadopago`). Ese sí es un webhook clásico porque MP es externo y notifica así por diseño; Payments valida la firma con `MERCADOPAGO_WEBHOOK_SECRET`. Es el único webhook del sistema.
@@ -262,7 +262,7 @@ La única excepción —porque no podemos cambiarla— es el **webhook de Mercad
 | Shipping App | Logística, dueña de los `shipments`, paquetes y tracking         | Enrique Seitz   | Operadores logísticos, envíos, paquetes (peso y dimensiones), cotizaciones, asignaciones, tracking |
 | Payments App | Pasarela y liquidaciones, integra Mercado Pago                   | Rocco Paoloni   | Pagos, intentos, comprobantes, liquidaciones por vendedor, transferencias                          |
 
-> **Importante**: cada app tiene **su propio proyecto en Clerk** (cuatro Clerks distintos). Los usuarios se autentican en la app que están usando; las apps se hablan entre sí por REST con `X-Service-Token`. No hay correlación de identidad entre Clerks. Ver `05-usuarios.md`.
+> **Importante**: todas las apps comparten **un único proyecto de Clerk** (el del Buyer App). Los usuarios tienen una sola cuenta de Clerk; su rol en cada app se determina por `publicMetadata`. Las apps se hablan entre sí por REST con `X-Service-Token`. Ver `05-usuarios.md`.
 
 ## 6. Estados clave
 
@@ -277,15 +277,33 @@ Las máquinas de estado completas viven en `06-estados.md`. Versión corta:
 
 ---
 
-## 7. Apéndice: diferencias con `old-docs/` (Payments App)
+## Apéndice: Cambios consolidados
 
-Este apéndice documenta los cambios entre `old-docs/01-descripcion.md` y la versión actual del documento que impactan exclusivamente a **Payments App**. El contenido de otras apps no se analiza.
+### A. Clerk: de 4 proyectos a 1 compartido
 
-### 7.1 Flujo de liquidación (§4.4)
+Este es el cambio más significativo de la documentación. Originalmente se describían 4 Clerks independientes; actualmente hay un único proyecto de Clerk compartido.
 
-| Aspecto | old-docs | actual | Por qué en Payments |
-|---------|----------|--------|---------------------|
-| Transferencia MP | `P->>MP: POST /v1/transfers (uno por seller)` → `MP-->>P: transfer_id` | **No implementado**. Payments no llama a `POST /v1/transfers`. El settlement queda `pending` y admin lo marca como pagado manualmente. | Las transfers de MP requieren `collector_id` de cada seller y no están en el alcance académico. Se reemplazó por acción admin: `PATCH /api/v1/settlements` marca settlements como `paid`. |
+| Aspecto | Documentación anterior | Documentación actual |
+|---|---|---|
+| Proyectos de Clerk | 4 (uno por app) | 1 compartido |
+| Identidad de usuario | N cuentas separadas (una por app) | 1 sola cuenta en todas las apps |
+| Determinación del rol | Implícita por el Clerk de la app | Explícita vía `publicMetadata.role` |
+| Admin transversal | Necesitaba cuentas en cada Clerk | Una cuenta con `publicMetadata.admin=true` |
+
+### B. Flujo de liquidación (§4.4) — Payments App
+
+| Aspecto | Anterior | Actual | Por qué |
+|---------|----------|--------|---------|
+| Transferencia MP | `P->>MP: POST /v1/transfers` → `MP-->>P: transfer_id` | **No implementado**. Payments no llama a `POST /v1/transfers`. El settlement queda `pending` y admin lo marca como pagado manualmente. | Las transfers de MP requieren `collector_id` de cada seller y no están en el alcance académico. Se reemplazó por acción admin: `PATCH /api/v1/settlements` marca settlements como `paid`. |
 | Settlement | Se crea automáticamente con transfer | Se crea al recibir `shipment-delivered` desde Shipping, queda `pending` | La liquidación se gatilla por entrega, no por pago. Como no hay transfer automática, el admin debe marcarla manualmente. |
-| Notificación Seller | `P-->>S: PATCH /api/v1/sales-orders/{id}/payment-status (settled)` | Comentada | Idem notificaciones inter-app deshabilitadas. |
+| Notificación Seller | `P-->>S: PATCH /api/v1/sales-orders/{id}/payment-status (settled)` | Comentada | Notificaciones inter-app deshabilitadas. |
 
+### C. §3 (Actores) — cambio en la tabla
+
+- **Anterior**: la tabla de actores listaba el Clerk específico que usaba cada actor (`Clerk-Buyer`, `Clerk-Seller`, etc.) como columna.
+- **Actual**: la tabla lista el valor de `publicMetadata` que distingue cada rol, sin columna de Clerk separado.
+
+### D. §5 (Mapa de comunicación) — nota al pie
+
+- **Anterior**: la nota al pie del mapa repetía que cada app tenía su propio Clerk.
+- **Actual**: la nota al pie establece que todas las apps comparten el mismo proyecto de Clerk.

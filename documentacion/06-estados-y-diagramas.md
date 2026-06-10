@@ -1,5 +1,9 @@
 # 1.6 — Estados y Diagramas Adicionales (anexo)
 
+> **Tipo C — Marketplace · BiciMarket**
+
+---
+
 > Anexo del `preview/`. Centraliza máquinas de estado, transiciones permitidas y diagramas de carril complementarios para casos no felices (rechazo, cancelación, devolución, fallo de pago).
 
 > Documentación de referencia para los integrantes del equipo de desarrollo, no forma parte de la entrega.
@@ -125,10 +129,10 @@ sequenceDiagram
     participant P as Payments App
     participant MP as Mercado Pago
 
-    C->>B: POST /api/v1/orders
+    C->>B: POST /api/v1/buyer/checkout
     B->>P: POST /api/v1/payments
-    P->>MP: POST /v1/payments
-    MP-->>P: payment_id, status=in_process
+    P->>MP: POST /checkout/preferences
+    MP-->>P: preference_id, status=in_process
     P-->>B: checkout_url
     B-->>C: redirige a MP
     C->>MP: Intenta con tarjeta rechazada

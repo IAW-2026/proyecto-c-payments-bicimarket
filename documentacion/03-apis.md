@@ -21,10 +21,12 @@
 | Header            | Aplica a                             | Valor                                                     |
 | ----------------- | ------------------------------------ | --------------------------------------------------------- |
 | `Content-Type`    | POST/PATCH/PUT con body              | `application/json` (o `multipart/form-data` para uploads) |
-| `Authorization`   | Llamadas desde la UI propia          | `Bearer <JWT-de-Clerk-de-la-app>`                         |
+| `Authorization`   | Llamadas desde la UI propia          | `Bearer <JWT-de-Clerk>`                                   |
 | `X-Service-Token` | Llamadas server-to-server entre apps | secret rotable del par origen→destino                     |
 | `X-Request-Id`    | Toda llamada inter-app               | UUID que se propaga en cadena                             |
 | `Idempotency-Key` | POST que crea recursos               | UUID elegido por el cliente                               |
+
+> Las cuatro apps comparten el mismo proyecto de Clerk. Ver `05-usuarios.md`.
 
 ### 0.3 Formato de error
 
@@ -85,7 +87,7 @@ Montos en **centavos** como entero (`amount_cents: 1599900` = ARS 15.999,00). Cu
 
 # Buyer App — `https://buyer.bicimarket.com` **_Vercel URL_**
 
-Owner: Camila Rojas Fritz. Clerk: `buyer.bicimarket`.
+Owner: Camila Rojas Fritz.
 
 ## B1. Perfil del comprador
 
@@ -317,94 +319,44 @@ Buyer App llama internamente a `GET /api/v1/products/{id}/availability` en Selle
 
 ### `POST /api/v1/buyer/checkout`
 
-Crea la orden a partir del carrito + dirección + cotizaciones. **Idempotency-Key obligatorio.**
+Crea la orden a partir del carrito activo + dirección. El costo de envío se cotiza automáticamente contra la Shipping App al momento del checkout.
+
+**Idempotency-Key obligatorio.**
 
 **Request**
 
 ```json
 {
   "shipping_address_id": "adr_01H…",
-  "seller_groups": [
-    {
-      "seller_profile_id": "slp_01H…",
-      "shipping_quote_id": "qte_01H…"
-    },
-    {
-      "seller_profile_id": "slp_02H…",
-      "shipping_quote_id": "qte_02H…"
-    }
-  ],
+  "returnUrl": "https://buyer.bicimarket.com/orders",
   "notes": "Dejar en portería si no hay nadie."
 }
 ```
+
+El handler de checkout orquesta internamente:
+
+1. Cotiza el envío contra Shipping App (todos los sellers en un request).
+2. Crea la `order` con `status=pending_payment` y una `order_seller_group` por vendedor.
+3. Inicia el pago contra Payments App.
+4. Devuelve la URL de pago al frontend.
 
 **Response 201**
 
 ```json
 {
-  "id": "ord_01H8X9…",
-  "buyer_profile_id": "byp_01H…",
-  "status": "pending_payment",
-  "items_total_cents": 74000000,
-  "shipping_total_cents": 1500000,
-  "total_cents": 75500000,
-  "currency": "ARS",
-  "shipping_address_snapshot": {
-    "street": "Av. Corrientes",
-    "number": "1234",
-    "city": "CABA",
-    "province": "Buenos Aires",
-    "postal_code": "C1043",
-    "country": "AR"
-  },
-  "seller_groups": [
-    {
-      "id": "osg_01H…",
-      "seller_profile_id": "slp_01H…",
-      "items_subtotal_cents": 65000000,
-      "shipping_cost_cents": 1200000,
-      "shipping_quote_id": "qte_01H…",
-      "weight_grams_total": 14500,
-      "status": "pending",
-      "shipping_status": "pending",
-      "shipment_id": null
-    },
-    {
-      "id": "osg_02H…",
-      "seller_profile_id": "slp_02H…",
-      "items_subtotal_cents": 9000000,
-      "shipping_cost_cents": 300000,
-      "shipping_quote_id": "qte_02H…",
-      "weight_grams_total": 1500,
-      "status": "pending",
-      "shipping_status": "pending",
-      "shipment_id": null
-    }
-  ],
-  "items": [
-    {
-      "id": "oit_01H…",
-      "seller_group_id": "osg_01H…",
-      "product_id": "prd_01H…",
-      "product_name_snapshot": "Bicicleta Trek Marlin 5",
-      "unit_price_cents": 65000000,
-      "quantity": 1,
-      "weight_grams_snapshot": 14500
-    }
-  ],
-  "created_at": "2026-04-25T14:32:00Z"
+  "paymentUrl": "https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=…",
+  "orderId": "ord_01H8X9…"
 }
 ```
 
 **Errores**:
 
-- `409 CART_EMPTY`
-- `409 QUOTE_EXPIRED` con `details: { quote_id, expires_at }`
-- `422 ADDRESS_INVALID`
+- `400 CART_EMPTY`
+- `400 ADDRESS_NOT_FOUND`
 
 ### `GET /api/v1/buyer/orders/{orderId}`
 
-**Response 200**: misma forma que el POST.
+**Response 200**: la orden completa con items, seller_groups, shipping_address_snapshot, timestamps.
 
 ### `GET /api/v1/buyer/orders`
 
@@ -435,15 +387,33 @@ Lo llama Payments App. Requiere `X-Service-Token`.
 ```json
 {
   "status": "paid",
-  "source": "payments",
-  "payment_id": "pay_01H…",
-  "occurred_at": "2026-04-25T14:35:00Z"
+  "payment_id": "pay_01H…"
 }
 ```
 
 `status` válido: `paid` | `payment_failed` | `cancelled` | `refunded`.
 
 **Response 200**: la orden actualizada.
+
+### `PATCH /api/v1/orders/{orderId}/seller-groups/{groupId}/status` (server-to-server)
+
+Lo llama Seller App. Requiere `X-Service-Token` (`SELLER_TO_BUYER_SERVICE_TOKEN`).
+
+Notifica que el vendedor aceptó la orden, transicionando `order_seller_group.status` de `pending` → `preparing`.
+
+**Request**
+
+```json
+{
+  "status": "preparing"
+}
+```
+
+`status` válido: `preparing`.
+
+**Response 200**: el seller_group actualizado.
+
+**Error 409 INVALID_TRANSITION** si el grupo no está en `pending`.
 
 ### `PATCH /api/v1/orders/{orderId}/seller-groups/{groupId}/shipping` (server-to-server)
 
@@ -453,32 +423,35 @@ Lo llama Shipping App.
 
 ```json
 {
+  "status": "in_transit",
   "shipping_status": "in_transit",
   "shipment_id": "shp_01H…",
   "tracking_number": "TRK-AR-789",
-  "occurred_at": "2026-04-26T08:10:00Z"
+  "tracking_url": "https://tracking.andreani.com/…"
 }
 ```
 
-`shipping_status` válido: `ready_for_pickup` | `picked_up` | `in_transit` | `out_for_delivery` | `delivered` | `returned`.
+`status` (obligatorio) actualiza `order_seller_group.status`: `preparing` | `ready_to_ship` | `in_transit` | `delivered`.
+
+`shipping_status` (opcional) actualiza el estado de envío físico: `created` | `ready_for_pickup` | `picked_up` | `in_transit` | `out_for_delivery` | `delivered` | `failed_delivery` | `returned`.
 
 **Response 200**: el seller_group actualizado.
 
 ### `POST /api/v1/buyer/orders/{orderId}/cancel`
 
-Solo si `status=pending_payment`.
+Solo si `status` es `pending_payment`, `paid` o `payment_failed`.
 
-**Request**: `{ "reason": "Cambié de opinión" }`.
+**Request**: sin body.
 
-**Response 200**: orden con `status=cancelled`.
+**Response 200**: `{ "id": "ord_01H…", "status": "cancelled" }`.
 
-**Error 409 CANNOT_CANCEL** si ya está paga.
+**Error 409 ORDER_NOT_CANCELLABLE** si el estado no permite cancelación.
 
 ---
 
 # Seller App — `https://seller.bicimarket.com` **_Vercel URL_**
 
-Owner: Pierino Spina. Clerk: `seller.bicimarket`.
+Owner: Pierino Spina.
 
 ## S1. Perfil de vendedor
 
@@ -760,7 +733,7 @@ Soft delete: pasa a `status=archived`. **Response 204**.
 
 Marca `fulfillment_status=accepted`.
 
-**Response 200**: sales_order actualizada.
+**Response 200**: sales_order actualizada. Seller App llama internamente a Buyer `PATCH /api/v1/orders/{orderId}/seller-groups/{groupId}/status` con `{ "status": "preparing" }`.
 
 ### `POST /api/v1/sales-orders/{salesOrderId}/reject`
 
@@ -813,35 +786,38 @@ Cuando pasa a `ready_to_ship`, Seller llama internamente a Shipping `POST /shipm
 
 # Shipping App — `https://shipping.bicimarket.com` **_Vercel URL_**
 
-Owner: Enrique Seitz. Clerk: `shipping.bicimarket`.
+Owner: Enrique Seitz.
 
 ## SH1. Cotizaciones
 
 ### `POST /api/v1/shipping-quotes`
 
-Lo llama Buyer App durante el checkout. Una cotización por cada `seller_group`.
+Lo llama Buyer App durante el checkout. Un único request con todos los orígenes (uno por vendedor).
 
 **Request**
 
 ```json
 {
-  "from": {
-    "seller_profile_id": "slp_01H…"
-  },
+  "pickups": [
+    {
+      "seller_profile_id": "slp_01H…",
+      "packages": [
+        { "weight_grams": 14500, "length_cm": 180, "width_cm": 60, "height_cm": 110 }
+      ]
+    },
+    {
+      "seller_profile_id": "slp_02H…",
+      "packages": [
+        { "weight_grams": 750, "length_cm": 70, "width_cm": 70, "height_cm": 10 }
+      ]
+    }
+  ],
   "to": {
     "city": "CABA",
     "province": "Buenos Aires",
     "postal_code": "C1043",
     "country": "AR"
   },
-  "packages": [
-    {
-      "weight_grams": 14500,
-      "length_cm": 180,
-      "width_cm": 60,
-      "height_cm": 110
-    }
-  ],
   "service_level": "standard"
 }
 ```
@@ -852,21 +828,45 @@ Lo llama Buyer App durante el checkout. Una cotización por cada `seller_group`.
 
 ```json
 {
-  "id": "qte_01H…",
-  "seller_profile_id": "slp_01H…",
-  "service_level": "standard",
-  "carrier": "andreani",
-  "cost_cents": 1200000,
-  "currency": "ARS",
-  "estimated_days_min": 3,
-  "estimated_days_max": 5,
-  "weight_grams_total": 14500,
-  "packages_count": 1,
-  "expires_at": "2026-04-25T15:32:00Z"
+  "quotes": [
+    {
+      "id": "qte_01H…",
+      "seller_profile_id": "slp_01H…",
+      "service_level": "standard",
+      "carrier": "andreani",
+      "cost_cents": 1200000,
+      "currency": "ARS",
+      "estimated_days_min": 3,
+      "estimated_days_max": 5,
+      "weight_grams_total": 14500,
+      "packages_count": 1,
+      "expires_at": "2026-04-25T15:32:00Z"
+    },
+    {
+      "id": "qte_02H…",
+      "seller_profile_id": "slp_02H…",
+      "service_level": "standard",
+      "carrier": "andreani",
+      "cost_cents": 300000,
+      "currency": "ARS",
+      "estimated_days_min": 2,
+      "estimated_days_max": 4,
+      "weight_grams_total": 750,
+      "packages_count": 1,
+      "expires_at": "2026-04-25T15:32:00Z"
+    }
+  ],
+  "origins_count": 2,
+  "discount_pct": 0.05,
+  "total_gross_cents": 1500000,
+  "total_net_cents": 1425000,
+  "currency": "ARS"
 }
 ```
 
-`expires_at` = ahora + 60 minutos. Buyer App debe usar esta `quote_id` al crear la orden, y Shipping valida que no esté vencida cuando se crea el shipment.
+`discount_pct` = 5 % por cada origen extra, tope 20 %. `total_net_cents` es el monto que se cobra al comprador.
+
+`expires_at` = ahora + 60 minutos. Cada quote se usa individualmente al crear el shipment.
 
 ---
 
@@ -1168,7 +1168,7 @@ Devuelve los envíos asignados al operador logueado.
 
 # Payments App — `https://payments.bicimarket.com` **_Vercel URL — admin UI únicamente_**
 
-Owner: Rocco Paoloni. Clerk: `payments.bicimarket` (**solo admins**: todo JWT debe traer `publicMetadata.admin=true` o se rechaza con 401).
+Owner: Rocco Paoloni. Clerk compartido — todo JWT para admin UI debe traer `publicMetadata.admin=true` o se rechaza con 401.
 
 > **Importante**: buyers y sellers no se loguean en Payments App. Las vistas "Mis comprobantes" y "Mis liquidaciones" viven dentro de Buyer App y Seller App respectivamente, que consumen estos endpoints por REST con `X-Service-Token`.
 
@@ -1606,6 +1606,8 @@ MERCADOPAGO_WEBHOOK_URL=https://payments.bicimarket.com/webhooks/mercadopago
 | `GET`  | `/v1/payments/{payment_id}`         | Resolver estado real tras webhook.                                  |
 | `POST` | `/v1/payments/{payment_id}/refunds` | Reembolso.                                                          |
 
+> `POST /v1/transfers` y `GET /v1/transfers/{id}` no están implementados. La transferencia al vendedor se realiza manualmente desde el panel admin de Payments (ver P4–P5).
+
 ## Tarjetas de prueba
 
 - Aprobada: `4111 1111 1111 1111`
@@ -1634,9 +1636,10 @@ El body es el del endpoint receptor (ver cada sección de este doc), no un envel
 
 | Disparador                                 | Origen   | Destino  | Llamada REST                                           |
 | ------------------------------------------ | -------- | -------- | ------------------------------------------------------ |
-| Pago aprobado / rechazado / refunded       | Payments | Buyer    | `PATCH /api/v1/orders/{id}/status`                     |
+| Pago aprobado / rechazado / refunded       | Payments | Buyer    | `PATCH /api/v1/orders/{id}`                            |
 | Pago aprobado → crear sub-orden por seller | Payments | Seller   | `POST /api/v1/sales-orders`                            |
 | Liquidación settled                        | Payments | Seller   | `PATCH /api/v1/sales-orders/{id}/payment-status`       |
+| Vendedor acepta orden                      | Seller   | Buyer    | `PATCH /api/v1/orders/{id}/seller-groups/{g}/status`   |
 | Cambio de envío                            | Shipping | Buyer    | `PATCH /api/v1/orders/{id}/seller-groups/{g}/shipping` |
 | Cambio de envío                            | Shipping | Seller   | `PATCH /api/v1/sales-orders/{id}/shipping-status`      |
 | Envío entregado → gatilla liquidación      | Shipping | Payments | `POST /api/v1/internal/shipment-delivered`             |
@@ -1672,130 +1675,101 @@ MERCADOPAGO_WEBHOOK_SECRET=…
 
 ---
 
-## Apéndice: diferencias con `old-docs/` (Payments App)
+## Apéndice: diferencias entre `docs/` y `documentacion-buyer/`
 
-Este apéndice detalla los cambios entre `old-docs/03-apis.md` y la versión actual en la sección **Payments App** (P1–P8). No se analizan otras apps.
+Este apéndice resume todos los cambios que existían entre las dos versiones de la documentación antes de su unificación en `/documentacion/`.
 
-### A. Estructura de Payments App
+### A. Clerk compartido
 
-| Aspecto | old-docs | actual | Por qué en Payments |
-|---------|----------|--------|---------------------|
-| Secciones | P1 (Pagos), P2 (Comprobantes), P3 (Liquidaciones), P4 (Webhook) | P1 (Pagos), P2 (Reembolsos CRUD), P3 (Comprobantes), P4 (Liquidaciones), P5 (Payouts), P6 (Webhook), P7 (Interno), P8 (Notificaciones) | Se agregaron CRUD admin completos para refunds, payouts y settlements al descubrir que la UI admin necesitaba gestión manual. |
-| Auth header | No documentaba el patrón service-token-OR-admin | Tabla explícita con fila "Los endpoints que aceptan service token O admin primero intentan validar el token; si falla, caen en verificación admin" | El código implementa este patrón en varios endpoints (refund, list payments) y necesitaba documentarse. |
+| Aspecto | docs/ (`04-apartheid`) | documentacion-buyer/ | Decisión |
+|---------|----------------------|---------------------|----------|
+| Proyectos Clerk | 4 proyectos independientes (buyer, seller, shipping, payments) | 4 proyectos independientes | **Un único proyecto Clerk** alojado en el Buyer App. Roles vía `publicMetadata`. Ver `05-usuarios.md`. |
+| Referencias en app headers | `Clerk: buyer.bicimarket`, `Clerk: seller.bicimarket`, etc. | Ídem | Reemplazadas por nota de Clerk compartido. |
 
-### B. P1 — Pagos
+### B. Buyer App — rutas
 
-#### B.1 `POST /api/v1/payments`
+| docs/ | documentacion-buyer/ | Decisión |
+|-------|---------------------|----------|
+| `GET /api/v1/buyer-profile/me` | `GET /api/v1/buyer/profile` | Usar `documentacion-buyer/` (prefijo `/buyer/`) |
+| `PUT /api/v1/buyer-profile/me` | `PATCH /api/v1/buyer/profile` | Usar `PATCH` (update parcial) |
+| `GET /api/v1/addresses`, `POST /api/v1/addresses` | `GET /api/v1/buyer/addresses`, `POST /api/v1/buyer/addresses` | Usar `documentacion-buyer/` |
+| `PUT /api/v1/addresses/{id}` | `PATCH /api/v1/buyer/addresses/{addressId}` | Usar `PATCH` |
+| `GET /api/v1/cart` | `GET /api/v1/buyer/cart` | Idéntico contenido |
+| `POST /api/v1/cart/items` | `POST /api/v1/buyer/cart` | Usar `documentacion-buyer/` |
+| `PATCH /api/v1/cart/items/{itemId}` | `PATCH /api/v1/buyer/cart/{itemId}` | Usar `documentacion-buyer/` |
+| `DELETE /api/v1/cart/items/{itemId}` | `DELETE /api/v1/buyer/cart/{itemId}` | Usar `documentacion-buyer/` |
+| `GET /api/v1/favorites` | `GET /api/v1/buyer/favorites` | Idéntico |
+| `POST /api/v1/orders` | `POST /api/v1/buyer/checkout` | Usar `documentacion-buyer/` — checkout unificado |
+| `GET /api/v1/orders` | `GET /api/v1/buyer/orders` | Usar `documentacion-buyer/` |
+| `GET /api/v1/orders/{id}` | `GET /api/v1/buyer/orders/{orderId}` | Usar `documentacion-buyer/` |
 
-| Aspecto | old-docs | actual | Por qué en Payments |
-|---------|----------|--------|---------------------|
-| Auth | No especificado explícitamente | Buyer token **o** admin | Buyer App llama con service token; admin puede crear pagos desde el panel. |
-| `buyer_email` en request | No existía | Campo `buyer_email` opcional | Se pasa a MP como `payer.email` en la preferencia. No se persiste en DB. |
-| `items_summary[].items` | No existía | Array anidado `items: [{ product_id, product_name_snapshot, unit_price_cents, quantity }]` | Alimenta la preferencia de MP con productos reales en vez de un ítem genérico. |
-| `items_summary[].order_seller_group_id` | No existía | `order_seller_group_id` por seller | Necesario para trazar settlements hasta el grupo de la orden cuando llega `shipment-delivered`. |
-| `return_urls` | Requerido | Opcional (`z.optional()`) | Wallet Brick no requiere `back_urls`. |
-| Response envelope | Plano: `{ id, order_id, amount_cents, checkout_url, ... }` | `{ data: { payment_id, checkout_url, preference_id }, public_key }` | Consistencia con estándar de paginación (§0.4). `preference_id` + `public_key` necesarios para Wallet Brick. `payment_id` se usa en vez de `id` para claridad. |
+### C. Buyer App — checkout
 
-#### B.2 `GET /api/v1/payments` (listado)
+| Aspecto | docs/ | documentacion-buyer/ | Decisión |
+|---------|-------|---------------------|----------|
+| Body del request | `shipping_address_id`, `seller_groups[]` con `shipping_quote_id` | `shipping_address_id`, `returnUrl`, `notes` | Usar `documentacion-buyer/` — backend orquesta todo |
+| `Idempotency-Key` | Obligatorio | Obligatorio | Igual |
+| Response | Orden completa con `status=pending_payment` | `{ paymentUrl, orderId }` | Usar `documentacion-buyer/` |
+| Error codes | `409 CART_EMPTY`, `409 QUOTE_EXPIRED`, `422 ADDRESS_INVALID` | `400 CART_EMPTY`, `400 ADDRESS_NOT_FOUND` | Usar `documentacion-buyer/` |
 
-| old-docs | actual |
-|----------|--------|
-| No existía | `GET /api/v1/payments?orderId=...&buyerId=...&status=...&from=...&to=...&q=...&page=1&limit=20` |
+### D. Buyer App — cancelar orden
 
-Por qué: necesario para dashboard admin y para que Buyer App consuma sus comprobantes.
+| Aspecto | docs/ | documentacion-buyer/ | Decisión |
+|---------|-------|---------------------|----------|
+| Estados permitidos | Solo `pending_payment` | `pending_payment`, `paid`, `payment_failed` | Usar `documentacion-buyer/` |
+| Request body | `{ "reason" }` | Sin body | Usar `documentacion-buyer/` |
+| Error code | `409 CANNOT_CANCEL` | `409 ORDER_NOT_CANCELLABLE` | Usar `documentacion-buyer/` |
 
-#### B.3 `GET /api/v1/payments/{paymentId}`
+### E. Buyer App — PATCH de shipping (server-to-server)
 
-| old-docs | actual |
-|----------|--------|
-| Response plano | Response `{ data: { ... } }` |
+| Aspecto | docs/ | documentacion-buyer/ | Decisión |
+|---------|-------|---------------------|----------|
+| Campos | `shipping_status`, `shipment_id`, `tracking_number`, `occurred_at` | `status`, `shipping_status` (opcional), `shipment_id`, `tracking_number`, `tracking_url` | Usar `documentacion-buyer/` — separa `status` de `shipping_status` |
+| `occurred_at` | Incluido | No incluido (Buyer lo registra internamente) | Usar `documentacion-buyer/` |
 
-#### B.4 `POST /api/v1/payments/{paymentId}/refund`
+### F. Seller → Buyer callback
 
-| Aspecto | old-docs | actual | Por qué en Payments |
-|---------|----------|--------|---------------------|
-| Auth | Sin auth especificada | Seller token **o** admin (fallback) | Se agregó fallback admin porque el panel de Payments necesita poder reembolsar sin depender de Seller App para escenarios de soporte. Código: `src/app/api/v1/payments/[paymentId]/refund/route.ts:16-19`. |
-| Request body | `{ amount_cents, reason, seller_profile_id }` | Igual + `Idempotency-Key` opcional (no estaba documentado) | Idempotencia permanente vía columna `@unique` en Refund. |
+| Aspecto | docs/ | documentacion-buyer/ | Decisión |
+|---------|-------|---------------------|----------|
+| Endpoint | No existía | `PATCH /api/v1/orders/{id}/seller-groups/{g}/status` con `{ "status": "preparing" }` | Agregado desde `documentacion-buyer/`. Necesario para que el comprador vea que el vendedor aceptó. |
 
-#### B.5 `PATCH /api/v1/payments/{paymentId}/confirm`
+### G. Shipping App — cotizaciones
 
-Sin cambios entre old-docs y actual.
+| Aspecto | docs/ | documentacion-buyer/ | Decisión |
+|---------|-------|---------------------|----------|
+| Request | Individual por seller | Batch con `pickups[]` | Usar `documentacion-buyer/` — una llamada para todo el carrito |
+| Response | `{ id, cost_cents, carrier, ... }` por quote | `{ origins_count, discount_pct, total_gross_cents, total_net_cents }` | **Merge**: response con array `quotes[]` individuales + agregados `total_gross_cents` / `total_net_cents` |
 
-### C. P2 — Reembolsos (CRUD admin) — NUEVA SECCIÓN
+### H. Payments App
 
-| Endpoint | old-docs | actual |
-|----------|----------|--------|
-| `GET /api/v1/refunds` | No existía | Lista paginada con filtros |
-| `POST /api/v1/refunds` | No existía → **Eliminado** | Se crea solo desde `POST /api/v1/payments/{id}/refund` (detalle del pago) |
-| `GET /api/v1/refunds/{id}` | No existía | Detalle + status_history |
-| `PATCH /api/v1/refunds/{id}` | No existía | Actualizar estado manual |
+| Aspecto | docs/ | documentacion-buyer/ | Decisión |
+|---------|-------|---------------------|----------|
+| Secciones | P1 (Pagos), P2 (Reembolsos CRUD), P3 (Comprobantes), P4 (Liquidaciones), P5 (Payouts), P6 (Webhook), P7 (Interno) | P1 (Pagos), P2 (Comprobantes), P3 (Liquidaciones), P4 (Webhook + Interno) | Usar `docs/` (CRUD completo) |
+| Response envelope | `{ data: { ... }, public_key }` | Plano `{ id, ... }` | Usar `docs/` (`{ data }` envelope) |
+| `items_summary[].items` | Array anidado de productos | No existía | Usar `docs/` — alimenta la preferencia de MP |
+| `items_summary[].order_seller_group_id` | Incluido | No existía | Usar `docs/` — necesario para settlements |
+| `return_urls` | Opcional | — | Usar `docs/` |
+| `buyer_email` | Incluido | No existía | Usar `docs/` — necesario para MP `payer.email` |
+| Auth pattern | Tabla explícita service-token-OR-admin | Sin detalle | Usar `docs/` |
+| Refund CRUD (P2) | `GET /api/v1/refunds`, `GET /refunds/{id}`, `PATCH /refunds/{id}` | No existía | Usar `docs/` — necesario para dashboard admin |
+| Payouts CRUD (P5) | `GET /payouts`, `POST /payouts`, `GET /payouts/{id}`, `PATCH /payouts/{id}` | Solo `POST /payouts` | Usar `docs/` (CRUD completo) |
+| `PATCH /api/v1/settlements` (batch) | Incluido | No existía | Usar `docs/` — reemplaza `POST /v1/transfers` de MP |
+| Webhook response | `{ "ok": true }` | `{ "received": true }` | Usar `docs/` |
 
-Por qué: el dashboard admin necesita crear y trackear reembolsos sin depender de Seller App. Los refunds antes solo existían como sub-recurso de payment (`POST /payments/{id}/refund`). Se eliminó `POST /api/v1/refunds` para centralizar la creación en un único punto: el detalle del pago, con dos modos (total o porcentaje).
+### J. Integración MP — endpoints consumidos
 
-### D. P3 — Comprobantes
+| Endpoint MP | docs/ | documentacion-buyer/ | Decisión |
+|-------------|-------|---------------------|----------|
+| `POST /checkout/preferences` | Sí | Sí | Mantener |
+| `POST /v1/payments` | **Eliminado** | Sí | **Eliminado** — no se usa (usamos Checkout Pro) |
+| `GET /v1/payments/{id}` | Sí | Sí | Mantener |
+| `POST /v1/payments/{id}/refunds` | Sí | Sí | Mantener |
+| `POST /v1/transfers` | **Eliminado** (no implementado) | Sí | **Eliminado** — no implementado |
+| `GET /v1/transfers/{id}` | **Eliminado** (no implementado) | Sí | **Eliminado** — no implementado |
 
-| Endpoint | old-docs | actual | Por qué en Payments |
-|----------|----------|--------|---------------------|
-| `GET /api/v1/receipts/{id}` | Sí, response plano | Response `{ data: { ... } }` | Consistencia. |
-| `GET /api/v1/receipts` | No existía | Lista paginada con `?paymentId=X` | Buyer App necesita listar comprobantes. |
-| `POST /api/v1/receipts` | No existía | Crear comprobante (Buyer token only) | Buyer App genera el comprobante tras pago aprobado. |
+### K. Mapa de notificaciones
 
-### E. P4 — Liquidaciones (settlements)
-
-| Endpoint | old-docs | actual | Por qué en Payments |
-|----------|----------|--------|---------------------|
-| `POST /api/v1/settlements` (interno, documentado por simetría) | Sí | **Eliminado** | El settlement se crea automáticamente al recibir `POST /api/v1/internal/shipment-delivered`. No hay endpoint público POST para settlements. |
-| `GET /api/v1/settlements/{id}` | Response plano | Response `{ data: { ... } }` | Consistencia. |
-| `GET /api/v1/settlements?sellerId=X` | Sin paginación estándar | Con paginación estándar `{ data: [...], pagination: { ... } }` | Consistencia. |
-| `PATCH /api/v1/settlements` (batch mark paid) | No existía | Marcar uno o varios settlements como `paid` | Reemplaza el flujo de `POST /v1/transfers` de MP. Admin marca manualmente. |
-| Incluye `payouts` | No | Cada settlement incluye `payouts` asociados | Trazabilidad de intentos de transferencia. |
-
-### F. P5 — Payouts (CRUD admin) — NUEVA SECCIÓN
-
-| Endpoint | old-docs | actual |
-|----------|----------|--------|
-| `GET /api/v1/payouts` | No existía | Lista paginada con filtros |
-| `POST /api/v1/payouts` | `POST /api/v1/payouts` existía (dentro de P3) | Igual, ahora en sección propia |
-| `GET /api/v1/payouts/{id}` | No existía | Detalle con settlement asociado |
-| `PATCH /api/v1/payouts/{id}` | No existía | Marcar como completado |
-
-### G. P6 — Webhook MP
-
-| old-docs | actual |
-|----------|--------|
-| Response `{ "received": true }` | Response `{ "ok": true }` |
-
-Cambio menor de naming, sin impacto funcional.
-
-### H. P7 — Interno (`shipment-delivered`)
-
-Sin cambios entre old-docs y actual.
-
-### J. Integración MP (final del doc)
-
-| Endpoint MP | old-docs | actual | Por qué en Payments |
-|-------------|----------|--------|---------------------|
-| `POST /v1/payments` | Sí | **Eliminado** | No se usa — Payments usa Checkout Pro vía `/checkout/preferences`. |
-| `POST /v1/transfers` | Sí | **Eliminado** | No implementado. Settlements se pagan manualmente. |
-| `GET /v1/transfers/{id}` | Sí | **Eliminado** | No implementado. |
-
-### K. Endpoints renombrados (otras apps, afectan cómo Payments consume)
-
-| old-docs | actual | Afecta a Payments |
-|----------|--------|-------------------|
-| `GET /api/v1/buyer-profile/me` | `GET /api/v1/buyer/profile` | Payments no consume este endpoint directamente. |
-| `PUT /api/v1/buyer-profile/me` | `PATCH /api/v1/buyer/profile` | Payments no consume. |
-| `GET /api/v1/addresses` | `GET /api/v1/buyer/addresses` | Payments no consume. |
-| `POST /api/v1/cart/items` | `POST /api/v1/buyer/cart` | Payments no consume. |
-| `POST /api/v1/orders` | `POST /api/v1/buyer/checkout` | Payments no consume. |
-| `PATCH /api/v1/orders/{id}/status` (server-to-server) | `PATCH /api/v1/orders/{id}` (cambia de path pero mismo rol) | Payments llama a este endpoint — sin cambio funcional. |
-| `PUT /api/v1/addresses/{id}` | `PATCH /api/v1/buyer/addresses/{id}` | Payments no consume. |
-| `PATCH /api/v1/cart/items/{id}` | `PATCH /api/v1/buyer/cart/{id}` | Payments no consume. |
-| `GET /api/v1/favorites` | `GET /api/v1/buyer/favorites` | Payments no consume. |
-
-### L. Sin cambios en Payments
-
-- `POST /api/v1/payments/{paymentId}/cancel` — idéntico contenido. 
-- `POST /api/v1/internal/shipment-delivered` — idéntico.
-- Mapa de notificaciones inter-app — idéntico.
-- Secretos y service tokens — idéntico.
+| Notificación | docs/ | documentacion-buyer/ | Decisión |
+|-------------|-------|---------------------|----------|
+| Vendedor acepta orden (Seller → Buyer) | No incluida | Incluida | Agregada desde `documentacion-buyer/` |
+| Resto de notificaciones | Idéntico | Idéntico | Igual |

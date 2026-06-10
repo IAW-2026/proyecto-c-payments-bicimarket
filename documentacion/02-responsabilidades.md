@@ -6,12 +6,14 @@
 
 ## 1. Distribución
 
-| App          | Responsable        | Repositorio                                                         | Clerk propio                                                            |
-| ------------ | ------------------ | ------------------------------------------------------------------- | ----------------------------------------------------------------------- |
-| Buyer App    | Camila Rojas Fritz | https://github.com/camilarojasfritz/proyecto-c-buyer-camilarojas    | Sí (`buyer.bicimarket`)                                                 |
-| Seller App   | Pierino Spina      | https://github.com/Spinapierino7/proyecto-c-seller-pierinospina.git | Sí (`seller.bicimarket`)                                                |
-| Shipping App | Enrique Seitz      | https://github.com/Enry6tz/proyecto-c-shipping-enriqueseitz         | Sí (`shipping.bicimarket`)                                              |
-| Payments App | Rocco Paoloni      | https://github.com/roccopaoloni/proyecto-c-payments-roccopaoloni    | Sí (`payments.bicimarket`), **solo para admins** (no buyers ni sellers) |
+| App          | Responsable        | Repositorio                                                         |
+| ------------ | ------------------ | ------------------------------------------------------------------- |
+| Buyer App    | Camila Rojas Fritz | https://github.com/camilarojasfritz/proyecto-c-buyer-camilarojas    |
+| Seller App   | Pierino Spina      | https://github.com/Spinapierino7/proyecto-c-seller-pierinospina.git |
+| Shipping App | Enrique Seitz      | https://github.com/Enry6tz/proyecto-c-shipping-enriqueseitz         |
+| Payments App | Rocco Paoloni      | https://github.com/roccopaoloni/proyecto-c-payments-roccopaoloni    |
+
+> Todas las apps comparten el mismo proyecto de Clerk (el del Buyer App). Las claves `CLERK_PUBLISHABLE_KEY` y `CLERK_SECRET_KEY` son idénticas en los cuatro repos.
 
 ---
 
@@ -23,7 +25,7 @@ Toda app del sistema cumple estas reglas. **Si alguna no las cumple, el sistema 
 
 1. **Versionado**: todos los endpoints viven bajo `/api/v1/...`.
 2. **Autenticación**:
-   - `Authorization: Bearer <JWT>` para llamadas hechas por la UI propia, validadas contra el Clerk de **esa misma app**.
+   - `Authorization: Bearer <JWT>` para llamadas hechas por la UI propia, validadas contra el Clerk compartido.
    - `X-Service-Token: <secret>` para llamadas server-to-server entre apps. Cada par origen→destino tiene su propio secret rotable.
 3. **Formato de error**: `{ "error": { "code": "...", "message": "...", "details": {} } }` con HTTP status apropiado. Códigos en `SCREAMING_SNAKE_CASE`.
 4. **Paginación**: GET de listado devuelve `{ "data": [...], "pagination": { "total": N, "page": 1, "limit": 20, "has_more": true } }`. Default `limit=20`, máximo `limit=100`.
@@ -43,7 +45,7 @@ Toda app del sistema cumple estas reglas. **Si alguna no las cumple, el sistema 
 
 ### 3.1 Datos propios (DB de Buyer App)
 
-- `buyer_profiles` — perfil local del comprador, vinculado a `clerk_user_id` del Clerk-Buyer.
+- `buyer_profiles` — perfil local del comprador, vinculado a `clerk_user_id` del Clerk compartido.
 - `addresses` — direcciones de envío del comprador.
 - `carts` y `cart_items` — carrito activo, con snapshot de precio al agregar.
 - `favorite_items` — wishlist.
@@ -194,11 +196,11 @@ Shipping App es mayormente reactiva. Solo consume:
 La Payments App **se compromete a**:
 
 - Crear pagos en Mercado Pago con un `external_reference = payment.id` para trazabilidad.
-- Devolver `checkout_url` y `payment_id` a Buyer App en el `POST /payments`.
+- Devolver `checkout_url`, `payment_id`, `preference_id` y `public_key` a Buyer App en el `POST /payments`.
 - Recibir el webhook de Mercado Pago (único webhook del sistema), validar la firma de MP y actualizar estado.
 - Notificar a Buyer (cambio de pago) y a Seller (creación de sub-orden, cambio de liquidación) con `POST`/`PATCH` REST sobre HTTP.
 - Calcular y registrar settlements por vendedor con `gross`, `fee` y `net`.
-- Disparar transferencias (`POST /v1/transfers`) al vendedor cuando Shipping reporta `delivered`.
+- Disparar transferencias (`POST /v1/transfers`) al vendedor cuando Shipping reporta `delivered` (no implementado — settlement queda `pending` para acción manual admin).
 - Manejar reembolsos parciales y totales.
 
 ### 6.3 Compromisos NO asumidos
@@ -212,7 +214,7 @@ La Payments App **se compromete a**:
 
 | Consume de   | Para qué                                                   | Endpoint                                                                                             |
 | ------------ | ---------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
-| Mercado Pago | Crear pagos, transferir, reembolsar                        | `POST /v1/payments`, `POST /v1/payments/{id}/refunds`, `POST /v1/transfers`, `GET /v1/payments/{id}` |
+| Mercado Pago | Crear preferencias, consultar pagos, reembolsar            | `POST /checkout/preferences`, `GET /v1/payments/{id}`, `POST /v1/payments/{id}/refunds`              |
 | Buyer App    | Validar que la orden existe y obtener `seller_profile_id`s | `GET /api/v1/orders/{id}` (con `X-Service-Token`)                                                    |
 
 ### 6.5 Lo que recibe (REST entrante)
@@ -229,7 +231,7 @@ La Payments App **se compromete a**:
 
 | Tipo                                            | Cuándo                                                     | Headers obligatorios                                | Auth                                        | Retry                                                |
 | ----------------------------------------------- | ---------------------------------------------------------- | --------------------------------------------------- | ------------------------------------------- | ---------------------------------------------------- |
-| **REST usuario → app propia**                   | UI llama a su backend                                      | `Authorization: Bearer <JWT>`                       | JWT validado contra Clerk de la misma app   | No (lo maneja el cliente)                            |
+| **REST usuario → app propia**                   | UI llama a su backend                                      | `Authorization: Bearer <JWT>`                       | JWT validado contra el Clerk compartido     | No (lo maneja el cliente)                            |
 | **REST app → app** (consultas Y notificaciones) | Cualquier comunicación interna entre apps                  | `X-Service-Token: <secret>`, `X-Request-Id: <uuid>` | Secret compartido del par origen→destino    | 3 reintentos con timeout 5s, backoff lineal 1s/3s/9s |
 | **Webhook MP → Payments**                       | Cambio de pago en Mercado Pago (único webhook del sistema) | Firma propia de MP (`x-signature`)                  | Validar contra `MERCADOPAGO_WEBHOOK_SECRET` | Lo maneja Mercado Pago                               |
 
@@ -263,37 +265,53 @@ Todas son llamadas REST con `X-Service-Token`, salvo la última que es el webhoo
 
 ---
 
-## 9. Apéndice: diferencias con `old-docs/` (Payments App)
+## 9. Apéndice: Cambios consolidados
 
-### 9.1 Payments App (§6) — cambios en compromisos
+### A. Payments App (§6) — cambios en compromisos
 
-| Compromiso en old-docs | Actual | Por qué en Payments |
-|------------------------|--------|---------------------|
-| `external_reference = order_id` | `external_reference = payment.id` (código: `src/app/api/v1/payments/route.ts:167`) | Usar `payment.id` permite reconocer el pago local desde el webhook de MP aunque la orden cambie. MP devuelve `external_reference` en el webhook; con `payment.id` hacemos lookup directo. |
-| `POST /v1/payments` (endpoint MP para crear pago) | Solo `POST /checkout/preferences` (SDK) | Checkout Pro vía preferencias es más simple. No necesitamos crear payments manualmente. |
-| `POST /v1/transfers` (transferir a seller) | **No implementado.** Settlement queda `pending`, admin marca como pagado | Las transfers MP no entran en el alcance académico. Se reemplazó por `PATCH /api/v1/settlements` manual. |
-| `GET /v1/transfers/{id}` | **No implementado.** No existe endpoint de consulta de transfers | No hay transfers. |
+| Compromiso anterior | Actual | Por qué |
+|---------------------|--------|---------|
+| `external_reference = order_id` | `external_reference = payment.id` | Usar `payment.id` permite reconocer el pago local desde el webhook de MP aunque la orden cambie. |
+| `POST /v1/payments` (endpoint MP para crear pago) | Solo `POST /checkout/preferences` (SDK) | Checkout Pro vía preferencias es más simple. |
+| `POST /v1/transfers` (transferir a seller) | **No implementado.** Settlement queda `pending`, admin marca como pagado | Las transfers MP no entran en el alcance académico. |
+| `GET /v1/transfers/{id}` | **No implementado.** | No hay transfers. |
 
-### 9.2 Payments App (§6) — nuevos compromisos
+### B. Payments App (§6) — nuevos compromisos
 
-| Compromiso actual | old-docs | Por qué en Payments |
-|-------------------|----------|---------------------|
+| Compromiso actual | Anterior | Por qué |
+|-------------------|----------|---------|
 | Devolver `preference_id` y `public_key` en POST /payments | No existía | Wallet Brick de MP necesita `preference_id` y `public_key` para renderizarse. |
 | `items_summary` con `items[]` y `order_seller_group_id` | Solo `{ seller_profile_id, subtotal_cents, shipping_cost_cents }` | Items anidados alimentan la preferencia de MP con productos reales. `order_seller_group_id` traza el settlement hasta el grupo de la orden. |
 | `return_urls` opcional | No documentado | Wallet Brick no requiere `back_urls`; MP autogenera defaults. |
 | Admin fallback en refund | No existía | El panel admin necesita reembolsar sin depender de Seller App (soporte). |
 | CRUD completo de refunds, payouts, settlements admin | Solo `POST /payouts` y `POST /settlements` interno | Dashboard admin necesita gestionar reembolsos y transferencias manualmente. |
 
-### 9.3 Payments App (§6.4) — endpoints MP consumidos
+### C. Tabla §1 — eliminación de la columna "Clerk propio"
 
-| Endpoint MP | old-docs | actual |
+- **Anterior**: la tabla de distribución incluía una columna "Clerk propio" donde cada app listaba su propio Clerk (`buyer.bicimarket`, `seller.bicimarket`, etc.).
+- **Actual**: esa columna se eliminó porque todas las apps ahora comparten un único proyecto de Clerk.
+
+### D. §2 Regla 2 — Autenticación
+
+- **Anterior**: "validadas contra el Clerk de **esa misma app**". Cada app validaba JWTs de su propio issuer y audience.
+- **Actual**: "validadas contra el Clerk compartido". Todas las apps aceptan el mismo JWT porque comparten el mismo proyecto de Clerk.
+
+### E. §7 Tabla de mecanismos de comunicación
+
+- **Anterior**: columna Auth decía "JWT validado contra Clerk de la misma app".
+- **Actual**: columna Auth dice "JWT validado contra el Clerk compartido".
+
+### F. Payments App (§6.4) — endpoints MP consumidos
+
+| Endpoint MP | Anterior | Actual |
 |-------------|----------|--------|
 | `POST /checkout/preferences` | Sí | Sí |
+| `POST /v1/payments` | Sí | **Eliminado** |
 | `GET /v1/payments/{id}` | Sí | Sí |
 | `POST /v1/payments/{id}/refunds` | Sí | Sí |
 | `POST /v1/transfers` | Sí | **Eliminado** |
 | `GET /v1/transfers/{id}` | Sí | **Eliminado** |
 
-### 9.4 Sin cambios
+### G. Sin cambios estructurales
 
-- §1-5, §7-8: idénticos. Payments no tiene cambios en estos apartados.
+- §1-5, §7-8: las reglas transversales, compromisos por app y tabla maestra de comunicación son idénticos en esencia. El único cambio de fondo es la arquitectura de Clerk y los ajustes en Payments App.
