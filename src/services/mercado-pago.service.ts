@@ -16,7 +16,7 @@ export function getPublicKey(): string | undefined {
 function getConfig() {
   const token = getAccessToken()
   if (!token) throw new Error('Mercado Pago access token not configured')
-  return new MercadoPagoConfig({ accessToken: token, options: { timeout: 60000 } })
+  return new MercadoPagoConfig({ accessToken: token, options: { timeout: 7000 } })
 }
 
 export async function createPreference(preference: Record<string, unknown>) {
@@ -29,7 +29,7 @@ export async function createPreference(preference: Record<string, unknown>) {
 async function fetchPaymentDetailsWithToken(paymentId: string, token: string) {
   const base = 'https://api.mercadopago.com'
   const url = `${base}/v1/payments/${encodeURIComponent(paymentId)}`
-  const resp = await axios.get(url, { headers: { Authorization: `Bearer ${token}` }, timeout: 60000 })
+  const resp = await axios.get(url, { headers: { Authorization: `Bearer ${token}` }, timeout: 7000 })
   return resp.data
 }
 
@@ -81,7 +81,7 @@ export async function getMerchantOrder(orderId: string, _liveMode?: boolean) {
   const url = `${base}/merchant_orders/${encodeURIComponent(orderId)}`
 
   try {
-    const resp = await axios.get(url, { headers: { Authorization: `Bearer ${primaryToken}` }, timeout: 60000 })
+    const resp = await axios.get(url, { headers: { Authorization: `Bearer ${primaryToken}` }, timeout: 7000 })
     return resp.data
   } catch (err: any) {
     const status = err?.response?.status
@@ -91,7 +91,7 @@ export async function getMerchantOrder(orderId: string, _liveMode?: boolean) {
     if (!fallbackToken) throw err
 
     try {
-      const resp = await axios.get(url, { headers: { Authorization: `Bearer ${fallbackToken}` }, timeout: 60000 })
+      const resp = await axios.get(url, { headers: { Authorization: `Bearer ${fallbackToken}` }, timeout: 7000 })
       return resp.data
     } catch (fallbackErr: any) {
       throw fallbackErr
@@ -116,7 +116,7 @@ export async function createRefund(paymentId: string, amountCents?: number) {
   }
   const resp = await axios.post(url, body, {
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-    timeout: 60000,
+    timeout: 7000,
   })
   return resp.data
 }
