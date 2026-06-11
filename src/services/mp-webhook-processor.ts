@@ -56,7 +56,6 @@ export async function processMpWebhookEvent(mpEventId: string) {
 
     let mpDetails: any = null
     try {
-      console.log(`[MP Processor] Fetching payment details: dataId=${dataId} payload.action=${payload?.action} payload.type=${payload?.type} payload.topic=${payload?.topic}`)
       mpDetails = await mpService.fetchPaymentDetails(dataId)
     } catch (innerErr: any) {
       const errMsg = innerErr?.message || String(innerErr)
@@ -204,10 +203,8 @@ export async function processMpWebhookEvent(mpEventId: string) {
 
           const itemsSummary = payment.items_summary as Array<Record<string, any>> | null
           if (itemsSummary && Array.isArray(itemsSummary)) {
-            console.log(`[MP Processor] Creating ${itemsSummary.length} sales order(s) in Seller App for payment ${payment.id}`)
             for (const seller of itemsSummary) {
               const sellerItems = (seller.items as Array<Record<string, any>>) || []
-              console.log(`[MP Processor] Creating sales order for seller=${seller.seller_profile_id} items=${sellerItems.length} subtotal=${seller.subtotal_cents} shipping=${seller.shipping_cost_cents}`)
               notificationTasks.push(
                 (async () => {
                   try {
@@ -230,7 +227,6 @@ export async function processMpWebhookEvent(mpEventId: string) {
                       shipping_quote_id: seller.shipping_quote_id as string,
                       payment_id: payment.id,
                     })
-                    console.log(`[MP Processor] Sales order created successfully for seller=${seller.seller_profile_id}`)
                   } catch (err) {
                     console.error(`[MP Processor] Failed creating sales order for seller=${seller.seller_profile_id}:`, err instanceof Error ? err.message : err)
                   }
@@ -239,9 +235,7 @@ export async function processMpWebhookEvent(mpEventId: string) {
             }
           }
 
-          const results = await Promise.allSettled(notificationTasks)
-          const succeeded = results.filter(r => r.status === 'fulfilled').length
-          console.log(`[MP Processor] Notifications complete: ${succeeded}/${results.length} succeeded`)
+          await Promise.allSettled(notificationTasks)
         }
       } catch (pErr) {
         console.error('[MP Processor] Failed updating payment', pErr)

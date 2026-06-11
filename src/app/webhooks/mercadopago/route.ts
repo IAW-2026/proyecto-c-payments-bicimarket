@@ -42,10 +42,6 @@ export async function POST(req: Request) {
     const rawId = payload?.data?.id ?? payload?.id ?? null
     let dataId: string | null = rawId != null ? String(rawId) : null
 
-    // ── DEBUG: log incoming webhook payload structure ──
-    console.log(`[MP:Webhook] action=${payload?.action} type=${payload?.type} topic=${payload?.topic} entity=${payload?.entity} live_mode=${payload?.live_mode} data.id=${rawId}`)
-    console.log(`[MP:Webhook] x-signature=${signatureHeader ? signatureHeader.slice(0, 30) + '...' : '(none)'} x-request-id=${xRequestId || '(none)'}`)
-
     function isMerchantOrderNotification(p: any): boolean {
       const t = (p?.type || '').toString().toLowerCase()
       const a = (p?.action || '').toString().toLowerCase()
@@ -65,14 +61,12 @@ export async function POST(req: Request) {
 
     // Skip non-payment entities (agreement, subscription, wallet_connect, etc.)
     if (payload?.entity && !['payment', 'merchant_order'].includes(payload.entity) && !isMerchantOrderNotification(payload)) {
-      console.info(`[MP Webhook] Skipping non-payment entity: ${payload.entity}`)
       return NextResponse.json({ ok: true })
     }
 
     // Ping / test notifications without a data.id cannot be validated;
     // ack them so MP doesn't keep retrying.
     if (!dataId) {
-      console.info(`[MP Webhook] No data.id — ignoring (ct=${contentType}, body=${bodyText.slice(0, 200)})`)
       try {
         await prisma.mpWebhookEvent.create({
           data: {

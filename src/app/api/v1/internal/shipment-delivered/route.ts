@@ -38,7 +38,6 @@ export async function POST(req: Request) {
     if (settlement) {
       // Settlement already exists; keep it as pending until payout is processed.
       // Do NOT auto-mark paid — that happens via payout or admin action.
-      console.log(`[ShipmentDelivered] Settlement ${settlement.id} already exists (status=${settlement.status}), skipping creation`)
     } else {
       settlement = await prisma.settlement.create({
         data: {
@@ -53,8 +52,6 @@ export async function POST(req: Request) {
           status: 'pending',
         },
       })
-      console.log(`[ShipmentDelivered] Settlement created: ${settlement.id} seller=${seller_profile_id} gross=${sellerAmounts.gross} fee=${sellerAmounts.fee} net=${sellerAmounts.net}`)
-
       await prisma.settlementStatusHistory.create({
         data: {
           settlement_id: settlement.id,
@@ -65,7 +62,6 @@ export async function POST(req: Request) {
       })
     }
 
-    console.log(`[ShipmentDelivered] Notifying seller payment status: salesOrder=${sales_order_id} settlement=${settlement.id}`)
     try {
       await notifySellerPaymentStatus(sales_order_id, 'settled', settlement.id)
     } catch (err) {

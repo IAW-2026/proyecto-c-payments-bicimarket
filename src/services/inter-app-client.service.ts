@@ -54,13 +54,7 @@ async function retryableCall(
   attemptNumber = 1,
 ) {
   try {
-    console.log(`[InterApp] → ${method} ${path} (attempt ${attemptNumber})`)
-    console.log(`[InterApp] Request payload:`, JSON.stringify(data).slice(0, 1000))
-
     const res = await client.request({ method, url: path, data })
-
-    console.log(`[InterApp] ← ${method} ${path} → ${res.status} (attempt ${attemptNumber})`)
-    console.log(`[InterApp] Response data:`, JSON.stringify(res.data).slice(0, 1000))
 
     await logOutboundCall({
       target_app: client.defaults.baseURL || 'unknown',
@@ -98,7 +92,6 @@ async function retryableCall(
     }
 
     const delay = RETRY_DELAYS[attemptNumber - 1]
-    console.log(`[InterApp] Retrying ${method} ${path} in ${delay}ms (attempt ${attemptNumber} → ${attemptNumber + 1})`)
     await new Promise(resolve => setTimeout(resolve, delay))
     return retryableCall(callId, client, method, path, data, attemptNumber + 1)
   }
@@ -112,7 +105,6 @@ export async function notifyBuyerOrderStatus(orderId: string, status: string, pa
     throw new Error('Buyer app URL or service token not configured')
   }
 
-  console.log(`[Payments→Buyer] Notifying order status: order=${orderId} status=${status} payment=${paymentId}`)
   const client = createInterAppClient(baseUrl, serviceToken)
   const path = `/api/v1/orders/${orderId}`
   return retryableCall(`buyer-order-${orderId}`, client, 'PATCH', path, {
@@ -144,9 +136,6 @@ export async function createSellerSalesOrder(sellerProfileId: string, payload: {
     throw new Error('Seller app URL or service token not configured')
   }
 
-  console.log(`[Payments→Seller] Creating sales order for seller=${sellerProfileId} order=${payload.order_id} group=${payload.order_seller_group_id}`)
-  console.log(`[Payments→Seller] Payload:`, JSON.stringify(payload))
-
   const client = createInterAppClient(baseUrl, serviceToken)
   return retryableCall(`seller-sales-order-${sellerProfileId}`, client, 'POST', '/api/v1/sales-orders', {
     ...payload,
@@ -162,7 +151,6 @@ export async function notifySellerPaymentStatus(salesOrderId: string, paymentSta
     throw new Error('Seller app URL or service token not configured')
   }
 
-  console.log(`[Payments→Seller] Notifying payment status: salesOrder=${salesOrderId} status=${paymentStatus} settlement=${settlementId}`)
   const client = createInterAppClient(baseUrl, serviceToken)
   const path = `/api/v1/sales-orders/${salesOrderId}/payment-status`
   return retryableCall(`seller-payment-status-${salesOrderId}`, client, 'PATCH', path, {
