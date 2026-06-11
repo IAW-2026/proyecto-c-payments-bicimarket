@@ -131,6 +131,7 @@ export async function createSellerSalesOrder(sellerProfileId: string, payload: {
   items: Array<{ product_id: string; product_name_snapshot: string; unit_price_cents: number; quantity: number }>
   items_subtotal_cents: number
   shipping_cost_cents: number
+  shipping_quote_id: string
   total_cents: number
   currency: string
   shipping_address_snapshot: Record<string, unknown>

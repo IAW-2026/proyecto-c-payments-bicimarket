@@ -227,6 +227,7 @@ export async function processMpWebhookEvent(mpEventId: string) {
                       total_cents: (seller.subtotal_cents as number) + (seller.shipping_cost_cents as number),
                       currency: payment.currency,
                       shipping_address_snapshot: {},
+                      shipping_quote_id: seller.shipping_quote_id as string,
                       payment_id: payment.id,
                     })
                     console.log(`[MP Processor] Sales order created successfully for seller=${seller.seller_profile_id}`)

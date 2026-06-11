@@ -4,6 +4,7 @@ export const itemsSummarySchema = z.object({
   seller_profile_id: z.string().min(1, 'seller_profile_id is required'),
   subtotal_cents: z.number().int().min(0),
   shipping_cost_cents: z.number().int().min(0),
+  shipping_quote_id: z.string().optional(),
   order_seller_group_id: z.string().optional(),
   buyer_profile_id: z.string().optional(),
   buyer_clerk_user_id: z.string().optional(),
