@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { validatePaymentWebhookSignature, isTimestampFresh } from '@/lib/webhook-signature'
+import { validatePaymentWebhookSignature, validateMercadoPagoSignature } from '@/lib/webhook-signature'
 import { processMpWebhookEvent } from '@/services/mp-webhook-processor'
 
 export async function POST(req: Request) {
@@ -80,11 +80,11 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: true })
     }
 
-    // Webhook-style (?source_news=webhooks) always signs with id + request-id + ts
-    const validation = validatePaymentWebhookSignature(signatureHeader, xRequestId, dataId)
-    const signatureValid = signatureHeader
-      ? (validation.valid && (validation.ts ? isTimestampFresh(validation.ts) : false))
-      : false
+    const isMerchantOrder = isMerchantOrderNotification(payload)
+    const validation = isMerchantOrder
+      ? validateMercadoPagoSignature(signatureHeader, dataId)
+      : validatePaymentWebhookSignature(signatureHeader, xRequestId, dataId)
+    const signatureValid = signatureHeader ? validation.valid : false
 
     const action = payload?.action || payload?.topic || 'unknown'
     const mpEventId = xRequestId || `${action}:${dataId}`
@@ -98,7 +98,11 @@ export async function POST(req: Request) {
           signature_valid: signatureValid,
         },
       })
-    } catch (dbErr) {
+    } catch (dbErr: any) {
+      if (dbErr?.code === 'P2002') {
+        // Duplicate mp_event_id — already processed; ack to stop retries
+        return NextResponse.json({ ok: true })
+      }
       console.error('[MP Webhook] Failed to persist event:', dbErr)
     }
 
@@ -110,7 +114,7 @@ export async function POST(req: Request) {
     }
 
     // ── Merchant_order: fetch order, process each payment ──
-    if (isMerchantOrderNotification(payload)) {
+    if (isMerchantOrder) {
       const { default: mpSvc } = await import('@/services/mercado-pago.service')
       let merchantOrder: any
       try {
