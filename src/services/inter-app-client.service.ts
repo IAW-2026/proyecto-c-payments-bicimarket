@@ -3,8 +3,6 @@ import { prisma } from '@/lib/prisma'
 import { generateRequestId } from '@/lib/request-id'
 import type { HttpMethod } from '@/generated/prisma/client'
 
-const RETRY_DELAYS = [1000, 3000, 9000]
-
 function createInterAppClient(baseUrl: string, serviceToken: string): AxiosInstance {
   const client = axios.create({
     baseURL: baseUrl,
@@ -45,13 +43,11 @@ async function logOutboundCall(data: OutboundCallRecord) {
   }
 }
 
-async function retryableCall(
-  callId: string,
+async function callApi(
   client: AxiosInstance,
   method: 'GET' | 'POST' | 'PATCH',
   path: string,
   data?: unknown,
-  attemptNumber = 1,
 ) {
   try {
     const res = await client.request({ method, url: path, data })
@@ -63,7 +59,7 @@ async function retryableCall(
       request_body: data,
       response_status: res.status,
       response_body: res.data,
-      attempts: attemptNumber,
+      attempts: 1,
       succeeded_at: new Date(),
     })
 
@@ -72,9 +68,8 @@ async function retryableCall(
     const axiosErr = err as { response?: { data?: { error?: { message?: string } }; status?: number }; message?: string }
     const errorMsg = axiosErr?.response?.data?.error?.message || axiosErr?.message || 'Unknown error'
     const statusCode = axiosErr?.response?.status
-    const isLastRetry = attemptNumber > RETRY_DELAYS.length
 
-    console.error(`[InterApp] ✗ ${method} ${path} failed (attempt ${attemptNumber}/${RETRY_DELAYS.length + 1}): status=${statusCode} error="${errorMsg}"`)
+    console.error(`[InterApp] ✗ ${method} ${path} failed: status=${statusCode} error="${errorMsg}"`)
 
     await logOutboundCall({
       target_app: client.defaults.baseURL || 'unknown',
@@ -82,18 +77,11 @@ async function retryableCall(
       path,
       request_body: data,
       response_status: statusCode,
-      attempts: attemptNumber,
+      attempts: 1,
       last_error: errorMsg,
     })
 
-    if (isLastRetry) {
-      console.error(`[InterApp] ✗ ${method} ${path} exhausted all retries, giving up`)
-      throw new Error(`Outbound call failed after ${attemptNumber - 1} retries: ${errorMsg}`)
-    }
-
-    const delay = RETRY_DELAYS[attemptNumber - 1]
-    await new Promise(resolve => setTimeout(resolve, delay))
-    return retryableCall(callId, client, method, path, data, attemptNumber + 1)
+    throw err
   }
 }
 
@@ -107,7 +95,7 @@ export async function notifyBuyerOrderStatus(orderId: string, status: string, pa
 
   const client = createInterAppClient(baseUrl, serviceToken)
   const path = `/api/v1/orders/${orderId}`
-  return retryableCall(`buyer-order-${orderId}`, client, 'PATCH', path, {
+  return callApi(client, 'PATCH', path, {
     status,
     source: 'payments',
     payment_id: paymentId,
@@ -137,7 +125,7 @@ export async function createSellerSalesOrder(sellerProfileId: string, payload: {
   }
 
   const client = createInterAppClient(baseUrl, serviceToken)
-  return retryableCall(`seller-sales-order-${sellerProfileId}`, client, 'POST', '/api/v1/sales-orders', {
+  return callApi(client, 'POST', '/api/v1/sales-orders', {
     ...payload,
     seller_profile_id: sellerProfileId,
   })
@@ -153,7 +141,7 @@ export async function notifySellerPaymentStatus(salesOrderId: string, paymentSta
 
   const client = createInterAppClient(baseUrl, serviceToken)
   const path = `/api/v1/sales-orders/${salesOrderId}/payment-status`
-  return retryableCall(`seller-payment-status-${salesOrderId}`, client, 'PATCH', path, {
+  return callApi(client, 'PATCH', path, {
     payment_status: paymentStatus,
     settlement_id: settlementId,
     occurred_at: new Date().toISOString(),
