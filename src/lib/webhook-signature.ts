@@ -79,24 +79,24 @@ export function validatePaymentWebhookSignature(
   dataId: string | null,
 ): { valid: boolean; ts: string | null } {
   if (!signatureHeader) {
-    console.warn('[WebhookSignature] Missing x-signature header')
+    console.warn('[WebhookSignature] Invalid signature')
     return { valid: false, ts: null }
   }
 
   const parsed = parseSignatureHeader(signatureHeader)
   if (!parsed) {
-    console.warn('[WebhookSignature] Could not parse x-signature header:', signatureHeader)
+    console.warn('[WebhookSignature] Invalid signature')
     return { valid: false, ts: null }
   }
 
   const secret = process.env.MERCADOPAGO_WEBHOOK_SECRET
   if (!secret) {
-    console.error('[WebhookSignature] MERCADOPAGO_WEBHOOK_SECRET is not configured')
+    console.warn('[WebhookSignature] Invalid signature')
     return { valid: false, ts: parsed.ts }
   }
 
   if (!dataId) {
-    console.warn('[WebhookSignature] Missing data.id — cannot validate')
+    console.warn('[WebhookSignature] Invalid signature')
     return { valid: false, ts: parsed.ts }
   }
 
@@ -107,7 +107,7 @@ export function validatePaymentWebhookSignature(
     return { valid: true, ts: parsed.ts }
   }
 
-  console.warn(`[WebhookSignature] Signature mismatch. Generated manifest: "${manifest}"`)
+  console.warn('[WebhookSignature] Invalid signature')
   return { valid: false, ts: parsed.ts }
 }
 
@@ -122,19 +122,19 @@ export function validateMercadoPagoSignature(
   tsOverride?: string,
 ): { valid: boolean; ts: string | null } {
   if (!signatureHeader) {
-    console.warn('[WebhookSignature] Missing x-signature header')
+    console.warn('[WebhookSignature] Invalid signature')
     return { valid: false, ts: null }
   }
 
   const parsed = parseSignatureHeader(signatureHeader)
   if (!parsed) {
-    console.warn('[WebhookSignature] Could not parse x-signature header:', signatureHeader)
+    console.warn('[WebhookSignature] Invalid signature')
     return { valid: false, ts: null }
   }
 
   const secret = process.env.MERCADOPAGO_WEBHOOK_SECRET
   if (!secret) {
-    console.error('[WebhookSignature] MERCADOPAGO_WEBHOOK_SECRET is not configured')
+    console.warn('[WebhookSignature] Invalid signature')
     return { valid: false, ts: parsed.ts }
   }
 
@@ -151,7 +151,7 @@ export function validateMercadoPagoSignature(
     return { valid: true, ts: parsed.ts }
   }
 
-  console.warn(`[WebhookSignature] Signature mismatch. Generated manifest: "${manifest}"`)
+  console.warn('[WebhookSignature] Invalid signature')
   return { valid: false, ts: parsed.ts }
 }
 

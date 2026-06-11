@@ -110,7 +110,7 @@ export async function POST(req: Request) {
     const validated = parsed.data
 
     console.info(`[Payments:${requestId}] Creating payment: order=${validated.order_id} amount=${validated.amount_cents}`)
-    console.log(`[Payments:${requestId}] items_summary sellers:`, validated.items_summary?.map(s => ({ seller: s.seller_profile_id, subtotal: s.subtotal_cents, shipping: s.shipping_cost_cents })))
+    console.log(`[Payments:${requestId}] items_summary sellers:`, validated.items_summary?.map(s => ({ seller: s.seller_profile_id, shipping_quote_id: s.shipping_quote_id, subtotal: s.subtotal_cents, shipping: s.shipping_cost_cents })))
 
     const payment = await prisma.payment.create({
       data: {
