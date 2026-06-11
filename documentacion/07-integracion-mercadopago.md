@@ -128,7 +128,7 @@ Content-Type: application/json
 1. **Auth**: valida `X-Service-Token` (Buyer App) o admin Clerk JWT.
 2. **Idempotencia**: requiere `Idempotency-Key`; si ya existe, retorna respuesta cacheada.
 3. **Validacion**: Zod schema (`src/schemas/payment.ts`) — `createPaymentSchema`.
-4. **Consistencia**: si se envio `items_summary`, verifica que `sum(subtotal_cents + shipping_cost_cents) === amount_cents`.
+4. **`amount_cents`**: se usa como total del pago. No se valida contra `items_summary` (el desglose por seller es informativo para settlements y la preferencia de MP).
 5. **`return_urls` opcional**: si no se envian, MP usa defaults y el Wallet Brick funciona igual.
 6. **Payment record**: crea registro en DB con `status: 'pending'`.
 7. **Preferencia MP**: construye el payload con `items` (mapeados desde `items_summary`), `payer.email` (tomado del request — no se persiste en DB), `external_reference: payment.id`, `auto_return: 'approved'`, `back_urls`.

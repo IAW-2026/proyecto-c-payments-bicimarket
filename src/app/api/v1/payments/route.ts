@@ -109,19 +109,6 @@ export async function POST(req: Request) {
 
     const validated = parsed.data
 
-    if (validated.items_summary) {
-      const summedAmount = validated.items_summary.reduce((sum, item) => {
-        return sum + item.subtotal_cents + item.shipping_cost_cents
-      }, 0)
-
-      if (summedAmount !== validated.amount_cents) {
-        return badRequest('ITEMS_SUMMARY_MISMATCH', `items_summary total (${summedAmount}) does not match amount_cents (${validated.amount_cents})`, {
-          expected: validated.amount_cents,
-          received: summedAmount,
-        })
-      }
-    }
-
     console.info(`[Payments:${requestId}] Creating payment: order=${validated.order_id} amount=${validated.amount_cents}`)
     console.log(`[Payments:${requestId}] items_summary sellers:`, validated.items_summary?.map(s => ({ seller: s.seller_profile_id, subtotal: s.subtotal_cents, shipping: s.shipping_cost_cents })))
 
