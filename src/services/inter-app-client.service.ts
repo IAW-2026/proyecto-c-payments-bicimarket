@@ -8,7 +8,7 @@ const RETRY_DELAYS = [1000, 3000, 9000]
 function createInterAppClient(baseUrl: string, serviceToken: string): AxiosInstance {
   const client = axios.create({
     baseURL: baseUrl,
-    timeout: 5000,
+    timeout: 15000,
     headers: {
       'Content-Type': 'application/json',
       'X-Service-Token': serviceToken,
@@ -114,7 +114,7 @@ export async function notifyBuyerOrderStatus(orderId: string, status: string, pa
 
   console.log(`[Payments→Buyer] Notifying order status: order=${orderId} status=${status} payment=${paymentId}`)
   const client = createInterAppClient(baseUrl, serviceToken)
-  const path = `/api/v1/orders/${orderId}/status`
+  const path = `/api/v1/orders/${orderId}`
   return retryableCall(`buyer-order-${orderId}`, client, 'PATCH', path, {
     status,
     source: 'payments',
