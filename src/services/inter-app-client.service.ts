@@ -8,7 +8,7 @@ const RETRY_DELAYS = [1000, 3000, 9000]
 function createInterAppClient(baseUrl: string, serviceToken: string): AxiosInstance {
   const client = axios.create({
     baseURL: baseUrl,
-    timeout: 15000,
+    timeout: 60000,
     headers: {
       'Content-Type': 'application/json',
       'X-Service-Token': serviceToken,
