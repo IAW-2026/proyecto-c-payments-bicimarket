@@ -53,6 +53,7 @@ export async function POST(req: Request) {
           status: 'pending',
         },
       })
+      console.log(`[ShipmentDelivered] Settlement created: ${settlement.id} seller=${seller_profile_id} gross=${sellerAmounts.gross} fee=${sellerAmounts.fee} net=${sellerAmounts.net}`)
 
       await prisma.settlementStatusHistory.create({
         data: {
@@ -64,10 +65,11 @@ export async function POST(req: Request) {
       })
     }
 
+    console.log(`[ShipmentDelivered] Notifying seller payment status: salesOrder=${sales_order_id} settlement=${settlement.id}`)
     try {
       await notifySellerPaymentStatus(sales_order_id, 'settled', settlement.id)
     } catch (err) {
-      console.error('Failed to notify seller of payment status:', err)
+      console.error('[ShipmentDelivered] notifySellerPaymentStatus failed:', err instanceof Error ? err.message : err)
     }
 
     return NextResponse.json({ received: true, settlement_id: settlement.id }, { status: 200 })

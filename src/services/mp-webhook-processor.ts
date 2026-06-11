@@ -190,12 +190,18 @@ export async function processMpWebhookEvent(mpEventId: string) {
 
         // ── Inter-app notifications ──
         if (payment.status !== 'approved' && paymentStatus === 'approved') {
-          try { await notifyBuyerOrderStatus(payment.order_id, 'paid', payment.id) } catch {}
-          try {
-            const itemsSummary = payment.items_summary as Array<Record<string, any>> | null
-            if (itemsSummary && Array.isArray(itemsSummary)) {
-              for (const seller of itemsSummary) {
-                const sellerItems = (seller.items as Array<Record<string, any>>) || []
+          console.log(`[MP Processor] Payment approved, notifying buyer: order=${payment.order_id} payment=${payment.id}`)
+          try { await notifyBuyerOrderStatus(payment.order_id, 'paid', payment.id) } catch (err) {
+            console.error(`[MP Processor] Failed to notify buyer for payment ${payment.id}:`, err instanceof Error ? err.message : err)
+          }
+
+          const itemsSummary = payment.items_summary as Array<Record<string, any>> | null
+          if (itemsSummary && Array.isArray(itemsSummary)) {
+            console.log(`[MP Processor] Creating ${itemsSummary.length} sales order(s) in Seller App for payment ${payment.id}`)
+            for (const seller of itemsSummary) {
+              const sellerItems = (seller.items as Array<Record<string, any>>) || []
+              console.log(`[MP Processor] Creating sales order for seller=${seller.seller_profile_id} items=${sellerItems.length} subtotal=${seller.subtotal_cents} shipping=${seller.shipping_cost_cents}`)
+              try {
                 await createSellerSalesOrder(seller.seller_profile_id as string, {
                   order_id: payment.order_id,
                   order_seller_group_id: seller.order_seller_group_id as string,
@@ -214,9 +220,12 @@ export async function processMpWebhookEvent(mpEventId: string) {
                   shipping_address_snapshot: {},
                   payment_id: payment.id,
                 })
+                console.log(`[MP Processor] Sales order created successfully for seller=${seller.seller_profile_id}`)
+              } catch (err) {
+                console.error(`[MP Processor] Failed creating sales order for seller=${seller.seller_profile_id}:`, err instanceof Error ? err.message : err)
               }
             }
-          } catch {}
+          }
         }
       } catch (pErr) {
         console.error('[MP Processor] Failed updating payment', pErr)

@@ -123,6 +123,7 @@ export async function POST(req: Request) {
     }
 
     console.info(`[Payments:${requestId}] Creating payment: order=${validated.order_id} amount=${validated.amount_cents}`)
+    console.log(`[Payments:${requestId}] items_summary sellers:`, validated.items_summary?.map(s => ({ seller: s.seller_profile_id, subtotal: s.subtotal_cents, shipping: s.shipping_cost_cents })))
 
     const payment = await prisma.payment.create({
       data: {
@@ -171,6 +172,7 @@ export async function POST(req: Request) {
     }
 
     try {
+      console.log(`[Payments:${requestId}] Creating MP preference with ${items.length} items, amount=${validated.amount_cents / 100}`)
       const mpResp = await mpService.createPreference(preference)
       const body = (mpResp && (mpResp as any).body || mpResp) as any
 
@@ -188,6 +190,7 @@ export async function POST(req: Request) {
 
       const checkout_url = body.init_point || body.sandbox_init_point
       const preference_id = body.id
+      console.log(`[Payments:${requestId}] MP preference created: id=${preference_id} checkout_url=${checkout_url}`)
 
       await prisma.payment.update({
         where: { id: payment.id },
@@ -199,7 +202,8 @@ export async function POST(req: Request) {
         public_key: mpService.getPublicKey?.(),
       }, { status: 201 })
     } catch (mpErr) {
-      console.error(`[Payments:${requestId}] Mercado Pago preference creation failed:`, mpErr)
+      const mpMessage = mpErr instanceof Error ? mpErr.message : (mpErr as any)?.response?.data?.message || String(mpErr)
+      console.error(`[Payments:${requestId}] MP preference failed for payment ${payment.id}: ${mpMessage}`)
       // record failed attempt
       await prisma.paymentAttempt.create({
         data: {
