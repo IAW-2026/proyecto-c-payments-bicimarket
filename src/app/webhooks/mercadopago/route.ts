@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { validatePaymentWebhookSignature, validateMercadoPagoSignature } from '@/lib/webhook-signature'
+import { validatePaymentWebhookSignature } from '@/lib/webhook-signature'
 import { processMpWebhookEvent } from '@/services/mp-webhook-processor'
 
 export async function POST(req: Request) {
@@ -81,9 +81,7 @@ export async function POST(req: Request) {
     }
 
     const isMerchantOrder = isMerchantOrderNotification(payload)
-    const validation = isMerchantOrder
-      ? validateMercadoPagoSignature(signatureHeader, dataId)
-      : validatePaymentWebhookSignature(signatureHeader, xRequestId, dataId)
+    const validation = validatePaymentWebhookSignature(signatureHeader, xRequestId, dataId)
     const signatureValid = signatureHeader ? validation.valid : false
 
     const action = payload?.action || payload?.topic || 'unknown'
