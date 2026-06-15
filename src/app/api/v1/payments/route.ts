@@ -135,6 +135,14 @@ export async function POST(req: Request) {
             })
           }
         }
+        if ((seller as any).shipping_cost_cents && (seller as any).shipping_cost_cents > 0) {
+          items.push({
+            title: 'Envío',
+            quantity: 1,
+            unit_price: (seller as any).shipping_cost_cents / 100,
+            currency_id: validated.currency,
+          })
+        }
       }
     }
 
