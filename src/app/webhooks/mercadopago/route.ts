@@ -87,6 +87,7 @@ export async function POST(req: Request) {
     const action = payload?.action || payload?.topic || 'unknown'
     const mpEventId = xRequestId || `${action}:${dataId}`
 
+    let isRetryOfFailed = false
     try {
       await prisma.mpWebhookEvent.create({
         data: {
@@ -98,10 +99,22 @@ export async function POST(req: Request) {
       })
     } catch (dbErr: any) {
       if (dbErr?.code === 'P2002') {
-        // Duplicate mp_event_id — already processed; ack to stop retries
-        return NextResponse.json({ ok: true })
+        // Check if existing event has status 'failed' — allow reprocessing
+        try {
+          const existing = await prisma.mpWebhookEvent.findUnique({ where: { mp_event_id: mpEventId } })
+          if (existing && existing.status === 'failed') {
+            console.warn(`[MP Webhook] Retry of failed event ${mpEventId}, reprocessing...`)
+            await prisma.mpWebhookEvent.update({ where: { mp_event_id: mpEventId }, data: { status: 'received', last_error: null, processed_at: null } })
+            isRetryOfFailed = true
+          } else {
+            return NextResponse.json({ ok: true })
+          }
+        } catch {
+          return NextResponse.json({ ok: true })
+        }
+      } else {
+        console.error('[MP Webhook] Failed to persist event:', dbErr)
       }
-      console.error('[MP Webhook] Failed to persist event:', dbErr)
     }
 
     // IPN notifications (no x-signature header) are processed without signature verification.

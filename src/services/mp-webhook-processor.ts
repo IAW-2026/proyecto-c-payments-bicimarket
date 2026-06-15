@@ -75,12 +75,16 @@ export async function processMpWebhookEvent(mpEventId: string) {
 
     // Attempt to locate local Payment record
     let payment: any = null
+    const matchAttempts: string[] = []
 
     const externalRef = mpDetails.external_reference || mpDetails.external_reference_id || mpDetails.externalReference || mpDetails.order?.external_reference
     if (externalRef) {
       try {
         payment = await prisma.payment.findUnique({ where: { id: externalRef } })
-      } catch {}
+        matchAttempts.push(`external_reference=${externalRef} found=${!!payment}`)
+      } catch (e) {
+        matchAttempts.push(`external_reference=${externalRef} error=${e instanceof Error ? e.message : e}`)
+      }
     }
 
     // Try via preference id stored in the initial PaymentAttempt.response_payload
@@ -91,7 +95,10 @@ export async function processMpWebhookEvent(mpEventId: string) {
           orderBy: { created_at: 'desc' },
         })
         if (attempt) payment = await prisma.payment.findUnique({ where: { id: attempt.payment_id } })
-      } catch {}
+        matchAttempts.push(`preference_id=${mpDetails.preference_id} found=${!!payment}`)
+      } catch (e) {
+        matchAttempts.push(`preference_id=${mpDetails.preference_id} error=${e instanceof Error ? e.message : e}`)
+      }
     }
 
     // Last resort: try finding a paymentAttempt that contains the MP payment id
@@ -102,7 +109,14 @@ export async function processMpWebhookEvent(mpEventId: string) {
           orderBy: { created_at: 'desc' },
         })
         if (attempt2) payment = await prisma.payment.findUnique({ where: { id: attempt2.payment_id } })
-      } catch {}
+        matchAttempts.push(`mp_payment_id=${dataId} found=${!!payment}`)
+      } catch (e) {
+        matchAttempts.push(`mp_payment_id=${dataId} error=${e instanceof Error ? e.message : e}`)
+      }
+    }
+
+    if (!payment) {
+      console.error(`[MP Processor] Could not match payment for dataId=${dataId} mpEventId=${mpEventId}. Strategies: [${matchAttempts.join(', ')}]`)
     }
 
     // Compute statuses and map fields

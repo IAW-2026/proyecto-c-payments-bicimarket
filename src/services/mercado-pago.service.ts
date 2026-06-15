@@ -59,14 +59,28 @@ export async function fetchPaymentDetails(paymentId: string, _liveMode?: boolean
     return await fetchPaymentDetailsWithToken(paymentId, primaryToken)
   } catch (err: any) {
     const status = err?.response?.status
+    const errBody = err?.response?.data
+    const errMsg = err?.message || String(err)
+    const env = process.env.MERCADOPAGO_SANDBOX_MODE === 'true' ? 'sandbox' : 'production'
+
+    console.warn(`[MP:fetchPaymentDetails] paymentId=${paymentId} env=${env} status=${status} message="${errMsg}" body=${JSON.stringify(errBody || {}).slice(0, 500)}`)
+
     if (status !== 404) throw err
 
     const fallbackToken = getFallbackToken(primaryToken)
-    if (!fallbackToken) throw err
+    if (!fallbackToken) {
+      console.warn(`[MP:fetchPaymentDetails] No fallback token available for paymentId=${paymentId}`)
+      throw err
+    }
 
+    console.warn(`[MP:fetchPaymentDetails] Retrying paymentId=${paymentId} with fallback token (env=${env === 'sandbox' ? 'production' : 'sandbox'})`)
     try {
       return await fetchPaymentDetailsWithToken(paymentId, fallbackToken)
     } catch (fallbackErr: any) {
+      const fbStatus = fallbackErr?.response?.status
+      const fbBody = fallbackErr?.response?.data
+      const fbMsg = fallbackErr?.message || String(fallbackErr)
+      console.error(`[MP:fetchPaymentDetails] Fallback also failed paymentId=${paymentId} status=${fbStatus} message="${fbMsg}" body=${JSON.stringify(fbBody || {}).slice(0, 500)}`)
       throw fallbackErr
     }
   }
