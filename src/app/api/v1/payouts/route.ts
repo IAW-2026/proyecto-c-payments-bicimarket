@@ -1,13 +1,17 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireAdmin } from '@/lib/admin-auth'
+import { validateServiceTokenAnalytics } from '@/lib/service-token'
 import { handleRouteError, badRequest, notFound, unauthorized } from '@/lib/errors'
 import { extractIdempotencyKey, findPayoutByKey } from '@/lib/idempotency'
 
 export async function GET(req: Request) {
   try {
-    const adminError = await requireAdmin()
-    if (adminError) return adminError
+    const svcToken = req.headers.get('X-Service-Token') || req.headers.get('x-service-token')
+    if (!validateServiceTokenAnalytics(svcToken)) {
+      const adminError = await requireAdmin()
+      if (adminError) return adminError
+    }
 
     const url = new URL(req.url)
     const settlementId = url.searchParams.get('settlementId')
