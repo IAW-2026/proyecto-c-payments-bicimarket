@@ -1,12 +1,14 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { requireAnalyticsToken } from '@/lib/analytics-auth'
-import { handleRouteError, badRequest } from '@/lib/errors'
+import { validateServiceTokenAnalytics } from '@/lib/service-token'
+import { handleRouteError, badRequest, unauthorized } from '@/lib/errors'
 
 export async function GET(req: Request) {
   try {
-    const authErr = requireAnalyticsToken(req)
-    if (authErr) return authErr
+    const svcToken = req.headers.get('X-Service-Token') || req.headers.get('x-service-token')
+    if (!svcToken || !validateServiceTokenAnalytics(svcToken)) {
+      return unauthorized('Valid analytics service token required', 'ANALYTICS_TOKEN_REQUIRED')
+    }
 
     const url = new URL(req.url)
     const from = url.searchParams.get('from')
