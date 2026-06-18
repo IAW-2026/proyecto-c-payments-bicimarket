@@ -1758,20 +1758,6 @@ Métricas agregadas de liquidaciones.
 }
 ```
 
-### `GET /api/v1/settlements/commission/timeseries`
-
-Comisiones mensuales (fee_amount_cents de settlements paid, agrupado por mes).
-
-**Response 200**
-```json
-{
-  "data": [
-    { "date": "2026-04-01", "value": 1500000 },
-    { "date": "2026-03-01", "value": 1200000 }
-  ]
-}
-```
-
 ### `GET /api/v1/settlements/status-breakdown`
 
 Conteo de liquidaciones por estado.
@@ -1818,24 +1804,6 @@ Métricas agregadas de reembolsos. `by_reason` solo incluye razones con reembols
       { "reason": "buyer_cancelled",  "count": 3 },
       { "reason": "not_delivered",    "count": 1 }
     ]
-  }
-}
-```
-
-### `GET /api/v1/payouts/metrics`
-
-Métricas agregadas de transferencias (payouts). No incluye `total_cents` porque los payouts no llevan monto — el monto vive en la settlement asociada.
-
-**Response 200**
-```json
-{
-  "data": {
-    "count": 30,
-    "completed_count": 25,
-    "failed_count": 2,
-    "in_progress_count": 1,
-    "pending_count": 1,
-    "manual_review_count": 1
   }
 }
 ```
