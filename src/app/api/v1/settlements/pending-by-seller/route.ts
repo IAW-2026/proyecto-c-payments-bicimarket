@@ -1,0 +1,41 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import { NextResponse } from 'next/server'
+import { prisma } from '@/lib/prisma'
+import { requireAnalyticsToken } from '@/lib/analytics-auth'
+import { handleRouteError } from '@/lib/errors'
+
+export async function GET(req: Request) {
+  try {
+    const authErr = requireAnalyticsToken(req)
+    if (authErr) return authErr
+
+    const url = new URL(req.url)
+    const from = url.searchParams.get('from')
+    const to = url.searchParams.get('to')
+
+    const dateFilter: Record<string, Date> = {}
+    if (from) dateFilter.gte = new Date(from)
+    if (to) dateFilter.lte = new Date(to)
+
+    const where: Record<string, unknown> = { status: 'pending' }
+    if (Object.keys(dateFilter).length) where.created_at = dateFilter
+
+    const rows = await prisma.settlement.groupBy({
+      by: ['seller_profile_id'],
+      where: where as any,
+      _sum: { gross_amount_cents: true },
+      _count: { id: true },
+      orderBy: { _sum: { gross_amount_cents: 'desc' } },
+    })
+
+    const data = rows.map(r => ({
+      seller_profile_id: r.seller_profile_id,
+      pending_count: r._count.id,
+      total_cents: r._sum.gross_amount_cents ?? 0,
+    }))
+
+    return NextResponse.json({ data })
+  } catch (err) {
+    return handleRouteError(err, 'computing pending settlements by seller')
+  }
+}

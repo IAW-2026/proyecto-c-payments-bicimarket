@@ -27,3 +27,7 @@ export function validateServiceTokenPaymentsToBuyer(token: string | null) {
 export function validateServiceTokenPaymentsToSeller(token: string | null) {
   return validateServiceToken(token, 'PAYMENTS_TO_SELLER_SERVICE_TOKEN')
 }
+
+export function validateServiceTokenAnalytics(token: string | null) {
+  return validateServiceToken(token, 'DASHBOARD_TO_PAYMENTS_SERVICE_TOKEN')
+}

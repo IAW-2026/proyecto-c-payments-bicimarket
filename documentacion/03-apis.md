@@ -1262,9 +1262,11 @@ Owner: Rocco Paoloni. Clerk compartido — todo JWT para admin UI debe traer `pu
 | Buyer App               | `X-Service-Token` de Buyer                               |
 | Seller App              | `X-Service-Token` de Seller                              |
 | Shipping App            | `X-Service-Token` de Shipping                            |
+| Analytics App           | `X-Service-Token` de Analytics — solo métricas, sin fallback admin |
 | Mercado Pago            | Firma `x-signature` + `MERCADOPAGO_WEBHOOK_SECRET`       |
 
 Los endpoints que aceptan **service token O admin** primero intentan validar el token; si falla, caen en verificación admin.
+Los endpoints de **Analytics / Metrics** (P8) solo aceptan el token de Analytics — no tienen fallback admin.
 
 ---
 
@@ -1669,6 +1671,177 @@ No documentado en Swagger (uso interno).
 
 ---
 
+## P8. Analytics / Metrics (solo Analytics App)
+
+> Todos los endpoints de esta sección son consumidos exclusivamente por el **Analytics Dashboard** (Analytics App).  
+> **Auth**: `X-Service-Token` con el token `DASHBOARD_TO_PAYMENTS_SERVICE_TOKEN`. Sin fallback admin.  
+> **Query params comunes**: `?from=<ISO>&to=<ISO>` para filtrar por rango de fechas.
+
+### `GET /api/v1/payments/metrics`
+
+Métricas agregadas de pagos.
+
+**Response 200**
+```json
+{
+  "data": {
+    "total_cents": 75500000,
+    "count": 42,
+    "approved_count": 38,
+    "avg_order_cents": 1797619,
+    "success_rate": 90.48
+  }
+}
+```
+
+### `GET /api/v1/payments/revenue/by-method`
+
+Ingresos por método de pago (approved payments).
+
+**Response 200**
+```json
+{
+  "data": [
+    { "method": "credit_card", "value": 50000000, "percentage": 66.23 },
+    { "method": "transfer",    "value": 20000000, "percentage": 26.49 },
+    { "method": "mercadopago", "value": 5500000,  "percentage": 7.28 }
+  ]
+}
+```
+
+### `GET /api/v1/payments/revenue/timeseries`
+
+Ingresos diarios (approved payments agrupados por día).
+
+**Response 200**
+```json
+{
+  "data": [
+    { "date": "2026-04-25", "value": 12000000 },
+    { "date": "2026-04-24", "value": 8500000 }
+  ]
+}
+```
+
+### `GET /api/v1/payments/revenue/by-seller`
+
+Ingresos por seller. Devuelve solo `seller_profile_id` — el Analytics App debe llamar `GET /api/v1/sellers/:id` en Seller App para resolver el nombre.
+
+**Response 200**
+```json
+{
+  "data": [
+    { "seller_profile_id": "slp_01H…", "revenue_cents": 45000000 },
+    { "seller_profile_id": "slp_02H…", "revenue_cents": 20000000 }
+  ]
+}
+```
+
+### `GET /api/v1/settlements/metrics`
+
+Métricas agregadas de liquidaciones.
+
+**Response 200**
+```json
+{
+  "data": {
+    "total_cents": 75500000,
+    "fee_cents": 7550000,
+    "net_cents": 67950000,
+    "total_count": 40,
+    "pending_count": 12,
+    "paid_count": 25,
+    "failed_count": 2,
+    "manual_review_count": 1,
+    "avg_velocity_days": 5.23
+  }
+}
+```
+
+### `GET /api/v1/settlements/commission/timeseries`
+
+Comisiones mensuales (fee_amount_cents de settlements paid, agrupado por mes).
+
+**Response 200**
+```json
+{
+  "data": [
+    { "date": "2026-04-01", "value": 1500000 },
+    { "date": "2026-03-01", "value": 1200000 }
+  ]
+}
+```
+
+### `GET /api/v1/settlements/status-breakdown`
+
+Conteo de liquidaciones por estado.
+
+**Response 200**
+```json
+{
+  "data": [
+    { "status": "pending",       "count": 12 },
+    { "status": "paid",          "count": 25 },
+    { "status": "failed",        "count": 2 },
+    { "status": "manual_review", "count": 1 }
+  ]
+}
+```
+
+### `GET /api/v1/settlements/pending-by-seller`
+
+Liquidaciones pendientes agrupadas por seller. Devuelve solo `seller_profile_id` — el Analytics App debe llamar `GET /api/v1/sellers/:id` en Seller App para resolver el nombre.
+
+**Response 200**
+```json
+{
+  "data": [
+    { "seller_profile_id": "slp_01H…", "pending_count": 3, "total_cents": 4500000 },
+    { "seller_profile_id": "slp_02H…", "pending_count": 1, "total_cents": 1500000 }
+  ]
+}
+```
+
+### `GET /api/v1/refunds/metrics`
+
+Métricas agregadas de reembolsos. `by_reason` solo incluye razones con reembolsos aprobados.
+
+**Response 200**
+```json
+{
+  "data": {
+    "total": 10,
+    "approved_count": 8,
+    "total_amount_cents": 2500000,
+    "by_reason": [
+      { "reason": "seller_rejected",  "count": 4 },
+      { "reason": "buyer_cancelled",  "count": 3 },
+      { "reason": "not_delivered",    "count": 1 }
+    ]
+  }
+}
+```
+
+### `GET /api/v1/payouts/metrics`
+
+Métricas agregadas de transferencias (payouts). No incluye `total_cents` porque los payouts no llevan monto — el monto vive en la settlement asociada.
+
+**Response 200**
+```json
+{
+  "data": {
+    "count": 30,
+    "completed_count": 25,
+    "failed_count": 2,
+    "in_progress_count": 1,
+    "pending_count": 1,
+    "manual_review_count": 1
+  }
+}
+```
+
+---
+
 # Integración Mercado Pago
 
 ## Configuración por entorno
@@ -1750,6 +1923,9 @@ PAYMENTS_TO_SELLER_SERVICE_TOKEN=…
 SHIPPING_TO_BUYER_SERVICE_TOKEN=…
 SHIPPING_TO_SELLER_SERVICE_TOKEN=…
 SHIPPING_TO_PAYMENTS_SERVICE_TOKEN=…
+
+# Analytics App — métricas del dashboard
+DASHBOARD_TO_PAYMENTS_SERVICE_TOKEN=…
 
 # Único webhook externo
 MERCADOPAGO_WEBHOOK_SECRET=…

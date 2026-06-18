@@ -17,9 +17,11 @@ info:
     | Buyer App     | `X-Service-Token` de Buyer                               |
     | Seller App    | `X-Service-Token` de Seller                              |
     | Shipping App  | `X-Service-Token` de Shipping                            |
+    | Analytics App | `X-Service-Token` de Analytics (`DASHBOARD_TO_PAYMENTS`) — sin fallback admin |
     | Mercado Pago  | Firma `x-signature` + `MERCADOPAGO_WEBHOOK_SECRET`       |
 
     Los endpoints que aceptan service token **O** admin primero intentan validar el token; si falla, caen en verificación admin.
+    Los endpoints de Analytics / Metrics solo aceptan el token de Analytics — no tienen fallback admin.
 
     **Convenciones**:
     - Montos en centavos como entero (`amount_cents: 1599900` = ARS 15.999,00). Currency siempre `"ARS"`.
@@ -1076,6 +1078,353 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
 
+  # ============================================================
+  # P8 — Analytics / Metrics (solo service token de Analytics)
+  # ============================================================
+  /api/v1/payments/metrics:
+    get:
+      summary: Métricas de pagos
+      description: |
+        **Métricas agregadas de pagos** para el Analytics Dashboard.
+
+        Auth: solo `X-Analytics-Token` (sin fallback admin).
+      tags:
+        - "Analytics / Metrics"
+      security:
+        - X-Analytics-Token: []
+      parameters:
+        - in: query
+          name: from
+          schema: { type: string, format: date-time }
+          description: Filter by start date (ISO 8601)
+        - in: query
+          name: to
+          schema: { type: string, format: date-time }
+          description: Filter by end date (ISO 8601)
+      responses:
+        '200':
+          description: Payment metrics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/PaymentMetrics'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/payments/revenue/by-method:
+    get:
+      summary: Ingresos por método de pago
+      description: |
+        **Ingresos aggregate por método de pago** (approved payments).
+
+        Auth: solo `X-Analytics-Token`.
+      tags:
+        - "Analytics / Metrics"
+      security:
+        - X-Analytics-Token: []
+      parameters:
+        - in: query
+          name: from
+          schema: { type: string, format: date-time }
+          description: Filter by start date (ISO 8601)
+        - in: query
+          name: to
+          schema: { type: string, format: date-time }
+          description: Filter by end date (ISO 8601)
+      responses:
+        '200':
+          description: Revenue by payment method
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RevenueByMethodItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/payments/revenue/timeseries:
+    get:
+      summary: Ingresos por día
+      description: |
+        **Serie temporal de ingresos** (approved payments agrupados por día).
+
+        Auth: solo `X-Analytics-Token`.
+      tags:
+        - "Analytics / Metrics"
+      security:
+        - X-Analytics-Token: []
+      parameters:
+        - in: query
+          name: from
+          schema: { type: string, format: date-time }
+          description: Filter by start date (ISO 8601)
+        - in: query
+          name: to
+          schema: { type: string, format: date-time }
+          description: Filter by end date (ISO 8601)
+      responses:
+        '200':
+          description: Daily revenue time series
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TimeSeriesItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/payments/revenue/by-seller:
+    get:
+      summary: Ingresos por seller
+      description: |
+        **Ingresos aggregate por seller** (approved payments, desglose via `items_summary`).
+
+        Devuelve solo `seller_profile_id` — el Analytics App debe llamar `GET /api/v1/sellers/:id` en Seller App para resolver el nombre.
+        Auth: solo `X-Analytics-Token`.
+      tags:
+        - "Analytics / Metrics"
+      security:
+        - X-Analytics-Token: []
+      parameters:
+        - in: query
+          name: from
+          schema: { type: string, format: date-time }
+          description: Filter by start date (ISO 8601)
+        - in: query
+          name: to
+          schema: { type: string, format: date-time }
+          description: Filter by end date (ISO 8601)
+      responses:
+        '200':
+          description: Revenue by seller
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/RevenueBySellerItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/settlements/metrics:
+    get:
+      summary: Métricas de liquidaciones
+      description: |
+        **Métricas agregadas de liquidaciones** (settlements).
+
+        Auth: solo `X-Analytics-Token`.
+      tags:
+        - "Analytics / Metrics"
+      security:
+        - X-Analytics-Token: []
+      parameters:
+        - in: query
+          name: from
+          schema: { type: string, format: date-time }
+          description: Filter by start date (ISO 8601)
+        - in: query
+          name: to
+          schema: { type: string, format: date-time }
+          description: Filter by end date (ISO 8601)
+      responses:
+        '200':
+          description: Settlement metrics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/SettlementMetrics'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/settlements/commission/timeseries:
+    get:
+      summary: Comisiones por mes
+      description: |
+        **Serie temporal de comisiones** (fee_amount_cents de settlements paid, agrupado por mes).
+
+        Auth: solo `X-Analytics-Token`.
+      tags:
+        - "Analytics / Metrics"
+      security:
+        - X-Analytics-Token: []
+      parameters:
+        - in: query
+          name: from
+          schema: { type: string, format: date-time }
+          description: Filter by start date (ISO 8601)
+        - in: query
+          name: to
+          schema: { type: string, format: date-time }
+          description: Filter by end date (ISO 8601)
+      responses:
+        '200':
+          description: Monthly commission time series
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TimeSeriesItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/settlements/status-breakdown:
+    get:
+      summary: Estado de liquidaciones
+      description: |
+        **Conteo de liquidaciones agrupadas por estado**.
+
+        Auth: solo `X-Analytics-Token`.
+      tags:
+        - "Analytics / Metrics"
+      security:
+        - X-Analytics-Token: []
+      parameters:
+        - in: query
+          name: from
+          schema: { type: string, format: date-time }
+          description: Filter by start date (ISO 8601)
+        - in: query
+          name: to
+          schema: { type: string, format: date-time }
+          description: Filter by end date (ISO 8601)
+      responses:
+        '200':
+          description: Settlement status breakdown
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/StatusBreakdownItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/settlements/pending-by-seller:
+    get:
+      summary: Liquidaciones pendientes por seller
+      description: |
+        **Liquidaciones pendientes agrupadas por seller**.
+
+        Devuelve solo `seller_profile_id` — el Analytics App debe llamar `GET /api/v1/sellers/:id` en Seller App para resolver el nombre.
+        Auth: solo `X-Analytics-Token`.
+      tags:
+        - "Analytics / Metrics"
+      security:
+        - X-Analytics-Token: []
+      parameters:
+        - in: query
+          name: from
+          schema: { type: string, format: date-time }
+          description: Filter by start date (ISO 8601)
+        - in: query
+          name: to
+          schema: { type: string, format: date-time }
+          description: Filter by end date (ISO 8601)
+      responses:
+        '200':
+          description: Pending settlements by seller
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PendingBySellerItem'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/refunds/metrics:
+    get:
+      summary: Métricas de reembolsos
+      description: |
+        **Métricas agregadas de reembolsos**.
+
+        Auth: solo `X-Analytics-Token`.
+      tags:
+        - "Analytics / Metrics"
+      security:
+        - X-Analytics-Token: []
+      parameters:
+        - in: query
+          name: from
+          schema: { type: string, format: date-time }
+          description: Filter by start date (ISO 8601)
+        - in: query
+          name: to
+          schema: { type: string, format: date-time }
+          description: Filter by end date (ISO 8601)
+      responses:
+        '200':
+          description: Refund metrics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/RefundMetrics'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/payouts/metrics:
+    get:
+      summary: Métricas de payouts
+      description: |
+        **Métricas agregadas de transferencias** (payouts).
+
+        Auth: solo `X-Analytics-Token`.
+      tags:
+        - "Analytics / Metrics"
+      security:
+        - X-Analytics-Token: []
+      parameters:
+        - in: query
+          name: from
+          schema: { type: string, format: date-time }
+          description: Filter by start date (ISO 8601)
+        - in: query
+          name: to
+          schema: { type: string, format: date-time }
+          description: Filter by end date (ISO 8601)
+      responses:
+        '200':
+          description: Payout metrics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/PayoutMetrics'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1088,6 +1437,11 @@ components:
       in: header
       name: X-Service-Token
       description: Service token for inter-app communication (Buyer, Seller, Shipping)
+    X-Analytics-Token:
+      type: apiKey
+      in: header
+      name: X-Service-Token
+      description: Analytics service token (DASHBOARD_TO_PAYMENTS_SERVICE_TOKEN) — no admin fallback
 
   schemas:
     Pagination:
@@ -1580,6 +1934,150 @@ components:
                 buyer_profile_id:
                   type: string
       required: [id, settlement_id, status, attempts, created_at, updated_at]
+
+    # Analytics / Metrics schemas
+    PaymentMetrics:
+      type: object
+      properties:
+        total_cents:
+          type: integer
+          description: Sum of amount_cents of all payments in the period
+        count:
+          type: integer
+          description: Total number of payments
+        approved_count:
+          type: integer
+          description: Number of approved payments
+        avg_order_cents:
+          type: integer
+          description: Average order amount in cents
+        success_rate:
+          type: number
+          format: float
+          description: Approval rate percentage (0-100)
+
+    RevenueByMethodItem:
+      type: object
+      properties:
+        method:
+          type: string
+          description: Payment method (credit_card, debit_card, mercadopago, transfer, wallet)
+        value:
+          type: integer
+          description: Total revenue in cents
+        percentage:
+          type: number
+          format: float
+          description: Percentage of total revenue
+
+    TimeSeriesItem:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+          description: Bucket date (YYYY-MM-DD for daily, YYYY-MM for monthly)
+        value:
+          type: integer
+          description: Aggregate value in cents
+
+    RevenueBySellerItem:
+      type: object
+      properties:
+        seller_profile_id:
+          type: string
+          description: Seller profile ID (slp_...)
+        revenue_cents:
+          type: integer
+          description: Total revenue in cents for this seller
+
+    SettlementMetrics:
+      type: object
+      properties:
+        total_cents:
+          type: integer
+          description: Sum of gross_amount_cents
+        fee_cents:
+          type: integer
+          description: Sum of fee_amount_cents
+        net_cents:
+          type: integer
+          description: Sum of net_amount_cents (gross - fee)
+        total_count:
+          type: integer
+          description: Total number of settlements
+        pending_count:
+          type: integer
+        paid_count:
+          type: integer
+        failed_count:
+          type: integer
+        manual_review_count:
+          type: integer
+        avg_velocity_days:
+          type: number
+          format: float
+          description: Average days from created_at to paid_at for paid settlements
+
+    StatusBreakdownItem:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [pending, paid, failed, manual_review]
+        count:
+          type: integer
+
+    PendingBySellerItem:
+      type: object
+      properties:
+        seller_profile_id:
+          type: string
+        pending_count:
+          type: integer
+        total_cents:
+          type: integer
+          description: Sum of gross_amount_cents for pending settlements
+
+    RefundMetrics:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Total number of refunds
+        approved_count:
+          type: integer
+          description: Number of approved refunds
+        total_amount_cents:
+          type: integer
+          description: Sum of amount_cents across all refunds
+        by_reason:
+          type: array
+          items:
+            type: object
+            properties:
+              reason:
+                type: string
+                enum: [seller_rejected, buyer_cancelled, not_delivered, manual]
+              count:
+                type: integer
+
+    PayoutMetrics:
+      type: object
+      properties:
+        count:
+          type: integer
+          description: Total number of payouts
+        completed_count:
+          type: integer
+        failed_count:
+          type: integer
+        in_progress_count:
+          type: integer
+        pending_count:
+          type: integer
+        manual_review_count:
+          type: integer
 
   responses:
     BadRequest:
