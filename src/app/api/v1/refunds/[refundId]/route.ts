@@ -9,7 +9,6 @@ export async function GET(
 ) {
   try {
     const { refundId } = await params
-    console.log('[refunds/[refundId]] GET called, refundId:', refundId)
     const adminErr = await requireAdmin()
     if (adminErr) return adminErr
 

@@ -6,12 +6,7 @@ import { handleRouteError, unauthorized } from '@/lib/errors'
 
 export async function GET(req: Request) {
   try {
-    console.log('[settlements/status-breakdown] GET called, path:', req.url)
     const svcToken = req.headers.get('X-Service-Token') || req.headers.get('x-service-token')
-    console.log('[settlements/status-breakdown] X-Service-Token present:', !!svcToken)
-    const envVar = process.env['DASHBOARD_TO_PAYMENTS_SERVICE_TOKEN']
-    console.log('[settlements/status-breakdown] DASHBOARD_TO_PAYMENTS_SERVICE_TOKEN configured:', !!envVar)
-    console.log('[settlements/status-breakdown] token match:', svcToken === envVar)
     if (!svcToken || !validateServiceTokenAnalytics(svcToken)) {
       return unauthorized('Valid analytics service token required', 'ANALYTICS_TOKEN_REQUIRED')
     }
