@@ -2,7 +2,7 @@ import crypto from 'crypto'
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { extractIdempotencyKey, findPaymentByKey } from '@/lib/idempotency'
-import { validateServiceTokenBuyer } from '@/lib/service-token'
+import { validateServiceTokenBuyer, validateServiceTokenAnalytics } from '@/lib/service-token'
 import { requireAdmin } from '@/lib/admin-auth'
 import { handleRouteError, badRequest, errorResponse } from '@/lib/errors'
 import { createPaymentSchema } from '@/schemas/payment'
@@ -11,7 +11,7 @@ import mpService from '@/services/mercado-pago.service'
 export async function GET(req: Request) {
   try {
     const svcToken = req.headers.get('X-Service-Token') || req.headers.get('x-service-token')
-    if (!validateServiceTokenBuyer(svcToken)) {
+    if (!validateServiceTokenAnalytics(svcToken) && !validateServiceTokenBuyer(svcToken)) {
       const adminErr = await requireAdmin()
       if (adminErr) return adminErr
     }

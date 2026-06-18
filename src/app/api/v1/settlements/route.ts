@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { validateServiceTokenSeller } from '@/lib/service-token'
+import { validateServiceTokenSeller, validateServiceTokenAnalytics } from '@/lib/service-token'
 import { requireAdmin } from '@/lib/admin-auth'
 import { validateSettlementTransition } from '@/lib/state-machines/settlement'
 import { handleRouteError } from '@/lib/errors'
@@ -73,7 +73,7 @@ export async function PATCH(req: Request) {
 export async function GET(req: Request) {
   try {
     const svcToken = req.headers.get('X-Service-Token') || req.headers.get('x-service-token')
-    if (!validateServiceTokenSeller(svcToken)) {
+    if (!validateServiceTokenAnalytics(svcToken) && !validateServiceTokenSeller(svcToken)) {
       const adminErr = await requireAdmin()
       if (adminErr) return adminErr
     }
