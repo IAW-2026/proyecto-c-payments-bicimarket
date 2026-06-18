@@ -8,10 +8,10 @@ export async function GET(
   { params }: { params: Promise<{ refundId: string }> }
 ) {
   try {
+    const { refundId } = await params
+    console.log('[refunds/[refundId]] GET called, refundId:', refundId)
     const adminErr = await requireAdmin()
     if (adminErr) return adminErr
-
-    const { refundId } = await params
 
     const refund = await prisma.refund.findUnique({
       where: { id: refundId },

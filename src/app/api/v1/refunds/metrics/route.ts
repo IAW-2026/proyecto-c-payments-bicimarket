@@ -6,7 +6,9 @@ import { handleRouteError, unauthorized } from '@/lib/errors'
 
 export async function GET(req: Request) {
   try {
+    console.log('[refunds/metrics] GET called, path:', req.url)
     const svcToken = req.headers.get('X-Service-Token') || req.headers.get('x-service-token')
+    console.log('[refunds/metrics] X-Service-Token present:', !!svcToken)
     if (!svcToken || !validateServiceTokenAnalytics(svcToken)) {
       return unauthorized('Valid analytics service token required', 'ANALYTICS_TOKEN_REQUIRED')
     }
