@@ -5,7 +5,12 @@ import { handleRouteError, badRequest, unauthorized } from '@/lib/errors'
 
 export async function GET(req: Request) {
   try {
+    console.log('[settlements/commission/timeseries] GET called, path:', req.url)
     const svcToken = req.headers.get('X-Service-Token') || req.headers.get('x-service-token')
+    console.log('[settlements/commission/timeseries] X-Service-Token present:', !!svcToken)
+    const envVar = process.env['DASHBOARD_TO_PAYMENTS_SERVICE_TOKEN']
+    console.log('[settlements/commission/timeseries] DASHBOARD_TO_PAYMENTS_SERVICE_TOKEN configured:', !!envVar)
+    console.log('[settlements/commission/timeseries] token match:', svcToken === envVar)
     if (!svcToken || !validateServiceTokenAnalytics(svcToken)) {
       return unauthorized('Valid analytics service token required', 'ANALYTICS_TOKEN_REQUIRED')
     }
