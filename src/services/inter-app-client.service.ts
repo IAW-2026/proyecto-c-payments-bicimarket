@@ -6,7 +6,7 @@ import type { HttpMethod } from '@/generated/prisma/client'
 function createInterAppClient(baseUrl: string, serviceToken: string): AxiosInstance {
   const client = axios.create({
     baseURL: baseUrl,
-    timeout: 20000,
+    timeout: 5000,
     headers: {
       'Content-Type': 'application/json',
       'X-Service-Token': serviceToken,
