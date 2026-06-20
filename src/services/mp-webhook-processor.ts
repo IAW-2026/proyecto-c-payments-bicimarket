@@ -62,9 +62,8 @@ async function cleanupStaleWebhookEvents() {
     console.error('[MP Processor] Cleanup error:', err instanceof Error ? err.message : err)
   }
 
-  console.log(`[MP Flow] Cleanup queued ${reprocessQueue.length} events for reprocessing`)
-  for (const id of reprocessQueue) {
-    processMpWebhookEvent(id).catch((e) => console.error(`[MP Processor] Reprocess of ${id} failed:`, e instanceof Error ? e.message : e))
+  if (reprocessQueue.length > 0) {
+    console.log(`[MP Flow] Cleanup reset ${reprocessQueue.length} events — reprocessing deferred to next webhook retry`)
   }
 }
 
