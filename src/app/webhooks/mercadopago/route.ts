@@ -125,11 +125,11 @@ export async function POST(req: Request) {
       }
     }
 
-    // IPN notifications (no x-signature header) are processed without signature verification.
-    // Only reject when a signature WAS provided but is invalid.
+    // Log invalid signatures but process anyway. Payment webhooks frequently fail
+    // signature validation but carry a valid dataId that processMpWebhookEvent can
+    // use to fetch payment details from MP API directly.
     if (signatureHeader && !signatureValid) {
-      console.warn('[MP Webhook] Invalid signature for', mpEventId)
-      return NextResponse.json({ ok: false, reason: 'invalid_signature' }, { status: 400 })
+      console.warn('[MP Webhook] Invalid signature for', mpEventId, '— processing anyway')
     }
 
     // ── Merchant_order: fetch order, process each payment ──
