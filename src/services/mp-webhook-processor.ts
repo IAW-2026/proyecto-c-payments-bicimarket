@@ -33,11 +33,39 @@ function mapPaymentMethod(mpMethod?: string) {
 }
 
 /**
+ * Find and reset events that are stuck in 'processing' (no activity for 5+ minutes)
+ * or failed with connection pool errors. Runs before every processing attempt.
+ */
+async function cleanupStaleWebhookEvents() {
+  try {
+    const staleProcessing = await prisma.mpWebhookEvent.findMany({
+      where: { status: 'processing', created_at: { lt: new Date(Date.now() - 5 * 60 * 1000) } },
+    })
+    for (const evt of staleProcessing) {
+      console.warn(`[MP Processor] Cleaning stale 'processing' event ${evt.mp_event_id} from ${evt.created_at}`)
+      await prisma.mpWebhookEvent.update({ where: { id: evt.id }, data: { status: 'received', last_error: 'stale: reset by cleanup', processed_at: null } })
+    }
+
+    const poolFailed = await prisma.mpWebhookEvent.findMany({
+      where: { status: 'failed', last_error: { contains: 'connection pool' } },
+    })
+    for (const evt of poolFailed) {
+      console.warn(`[MP Processor] Cleaning pool-failed event ${evt.mp_event_id}`)
+      await prisma.mpWebhookEvent.update({ where: { id: evt.id }, data: { status: 'received', last_error: null, processed_at: null } })
+    }
+  } catch (err) {
+    console.error('[MP Processor] Cleanup error:', err instanceof Error ? err.message : err)
+  }
+}
+
+/**
  * Processor: enrich event, reconcile with Payment model, create attempt/receipt/history.
  * This is intentionally defensive and best-effort — it logs but avoids throwing.
  */
 export async function processMpWebhookEvent(mpEventId: string) {
   try {
+    await cleanupStaleWebhookEvents()
+
     const evt = await prisma.mpWebhookEvent.findUnique({ where: { mp_event_id: mpEventId } })
     if (!evt) return
 
@@ -201,56 +229,6 @@ export async function processMpWebhookEvent(mpEventId: string) {
           }
         }
 
-        // ── Inter-app notifications ──
-        if (payment.status !== 'approved' && paymentStatus === 'approved') {
-          const notificationTasks: Promise<void>[] = []
-
-          notificationTasks.push(
-            (async () => {
-              try {
-                await notifyBuyerOrderStatus(payment.order_id, 'paid', payment.id)
-              } catch (err) {
-                console.error(`[MP Processor] Failed to notify buyer for payment ${payment.id}:`, err instanceof Error ? err.message : err)
-              }
-            })(),
-          )
-
-          const itemsSummary = payment.items_summary as Array<Record<string, any>> | null
-          if (itemsSummary && Array.isArray(itemsSummary)) {
-            for (const seller of itemsSummary) {
-              const sellerItems = (seller.items as Array<Record<string, any>>) || []
-              notificationTasks.push(
-                (async () => {
-                  try {
-                    await createSellerSalesOrder(seller.seller_profile_id as string, {
-                      order_id: payment.order_id,
-                      order_seller_group_id: seller.order_seller_group_id as string,
-                      buyer_profile_id: payment.buyer_profile_id,
-                      buyer_clerk_user_id: payment.buyer_clerk_user_id,
-                      items: sellerItems.map((it) => ({
-                        product_id: it.product_id,
-                        product_name_snapshot: it.product_name_snapshot,
-                        unit_price_cents: it.unit_price_cents,
-                        quantity: it.quantity,
-                      })),
-                      items_subtotal_cents: seller.subtotal_cents as number,
-                      shipping_cost_cents: seller.shipping_cost_cents as number,
-                      total_cents: (seller.subtotal_cents as number) + (seller.shipping_cost_cents as number),
-                      currency: payment.currency,
-                      shipping_address_snapshot: {},
-                      shipping_quote_id: seller.shipping_quote_id as string,
-                      payment_id: payment.id,
-                    })
-                  } catch (err) {
-                    console.error(`[MP Processor] Failed creating sales order for seller=${seller.seller_profile_id}:`, err instanceof Error ? err.message : err)
-                  }
-                })(),
-              )
-            }
-          }
-
-          await Promise.allSettled(notificationTasks)
-        }
       } catch (pErr) {
         console.error('[MP Processor] Failed updating payment', pErr)
       }
@@ -258,6 +236,57 @@ export async function processMpWebhookEvent(mpEventId: string) {
 
     // Finally mark webhook event processed
     await prisma.mpWebhookEvent.update({ where: { mp_event_id: mpEventId }, data: { payload: newPayload as any, status: 'processed', processed_at: new Date() } })
+
+    // ── Inter-app notifications (fire-and-forget, after event marked processed) ──
+    if (payment && payment.status !== 'approved' && paymentStatus === 'approved') {
+      const notificationTasks: Promise<void>[] = []
+
+      notificationTasks.push(
+        (async () => {
+          try {
+            await notifyBuyerOrderStatus(payment.order_id, 'paid', payment.id)
+          } catch (err) {
+            console.error(`[MP Processor] Failed to notify buyer for payment ${payment.id}:`, err instanceof Error ? err.message : err)
+          }
+        })(),
+      )
+
+      const itemsSummary = payment.items_summary as Array<Record<string, any>> | null
+      if (itemsSummary && Array.isArray(itemsSummary)) {
+        for (const seller of itemsSummary) {
+          const sellerItems = (seller.items as Array<Record<string, any>>) || []
+          notificationTasks.push(
+            (async () => {
+              try {
+                await createSellerSalesOrder(seller.seller_profile_id as string, {
+                  order_id: payment.order_id,
+                  order_seller_group_id: seller.order_seller_group_id as string,
+                  buyer_profile_id: payment.buyer_profile_id,
+                  buyer_clerk_user_id: payment.buyer_clerk_user_id,
+                  items: sellerItems.map((it) => ({
+                    product_id: it.product_id,
+                    product_name_snapshot: it.product_name_snapshot,
+                    unit_price_cents: it.unit_price_cents,
+                    quantity: it.quantity,
+                  })),
+                  items_subtotal_cents: seller.subtotal_cents as number,
+                  shipping_cost_cents: seller.shipping_cost_cents as number,
+                  total_cents: (seller.subtotal_cents as number) + (seller.shipping_cost_cents as number),
+                  currency: payment.currency,
+                  shipping_address_snapshot: {},
+                  shipping_quote_id: seller.shipping_quote_id as string,
+                  payment_id: payment.id,
+                })
+              } catch (err) {
+                console.error(`[MP Processor] Failed creating sales order for seller=${seller.seller_profile_id}:`, err instanceof Error ? err.message : err)
+              }
+            })(),
+          )
+        }
+      }
+
+      Promise.allSettled(notificationTasks).catch(() => {})
+    }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err)
     console.error('[MP Processor] Unexpected error processing event', mpEventId, errMsg)
