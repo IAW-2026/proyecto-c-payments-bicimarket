@@ -275,54 +275,63 @@ export async function processMpWebhookEvent(mpEventId: string) {
 
     // ── Inter-app notifications (fire-and-forget, after event marked processed) ──
     if (payment && payment.status !== 'approved' && paymentStatus === 'approved') {
-      console.log(`[MP Flow] Firing inter-app notifications for payment ${payment.id} (transitioned to approved)`)
-      const notificationTasks: Promise<void>[] = []
+      // Atomic claim: only the first concurrent webhook wins
+      const claim = await prisma.payment.updateMany({
+        where: { id: payment.id, notified_at: null },
+        data: { notified_at: new Date() },
+      })
+      if (claim.count === 0) {
+        console.log(`[MP Flow] Notifications already claimed for payment ${payment.id}, skipping`)
+      } else {
+        console.log(`[MP Flow] Firing inter-app notifications for payment ${payment.id} (claimed)`)
+        const notificationTasks: Promise<void>[] = []
 
-      notificationTasks.push(
-        (async () => {
-          try {
-            await notifyBuyerOrderStatus(payment.order_id, 'paid', payment.id)
-          } catch (err) {
-            console.error(`[MP Processor] Failed to notify buyer for payment ${payment.id}:`, err instanceof Error ? err.message : err)
+        notificationTasks.push(
+          (async () => {
+            try {
+              await notifyBuyerOrderStatus(payment.order_id, 'paid', payment.id)
+            } catch (err) {
+              console.error(`[MP Processor] Failed to notify buyer for payment ${payment.id}:`, err instanceof Error ? err.message : err)
+            }
+          })(),
+        )
+
+        const itemsSummary = payment.items_summary as Array<Record<string, any>> | null
+        if (itemsSummary && Array.isArray(itemsSummary)) {
+          for (const seller of itemsSummary) {
+            const sellerItems = (seller.items as Array<Record<string, any>>) || []
+            notificationTasks.push(
+              (async () => {
+                try {
+                  await createSellerSalesOrder(seller.seller_profile_id as string, {
+                    order_id: payment.order_id,
+                    order_seller_group_id: seller.order_seller_group_id as string,
+                    buyer_profile_id: payment.buyer_profile_id,
+                    buyer_clerk_user_id: payment.buyer_clerk_user_id,
+                    items: sellerItems.map((it) => ({
+                      product_id: it.product_id,
+                      product_name_snapshot: it.product_name_snapshot,
+                      unit_price_cents: it.unit_price_cents,
+                      quantity: it.quantity,
+                    })),
+                    items_subtotal_cents: seller.subtotal_cents as number,
+                    shipping_cost_cents: seller.shipping_cost_cents as number,
+                    total_cents: (seller.subtotal_cents as number) + (seller.shipping_cost_cents as number),
+                    currency: payment.currency,
+                    shipping_address_snapshot: {},
+                    shipping_quote_id: seller.shipping_quote_id as string,
+                    payment_id: payment.id,
+                  })
+                } catch (err) {
+                  console.error(`[MP Processor] Failed creating sales order for seller=${seller.seller_profile_id}:`, err instanceof Error ? err.message : err)
+                }
+              })(),
+            )
           }
-        })(),
-      )
-
-      const itemsSummary = payment.items_summary as Array<Record<string, any>> | null
-      if (itemsSummary && Array.isArray(itemsSummary)) {
-        for (const seller of itemsSummary) {
-          const sellerItems = (seller.items as Array<Record<string, any>>) || []
-          notificationTasks.push(
-            (async () => {
-              try {
-                await createSellerSalesOrder(seller.seller_profile_id as string, {
-                  order_id: payment.order_id,
-                  order_seller_group_id: seller.order_seller_group_id as string,
-                  buyer_profile_id: payment.buyer_profile_id,
-                  buyer_clerk_user_id: payment.buyer_clerk_user_id,
-                  items: sellerItems.map((it) => ({
-                    product_id: it.product_id,
-                    product_name_snapshot: it.product_name_snapshot,
-                    unit_price_cents: it.unit_price_cents,
-                    quantity: it.quantity,
-                  })),
-                  items_subtotal_cents: seller.subtotal_cents as number,
-                  shipping_cost_cents: seller.shipping_cost_cents as number,
-                  total_cents: (seller.subtotal_cents as number) + (seller.shipping_cost_cents as number),
-                  currency: payment.currency,
-                  shipping_address_snapshot: {},
-                  shipping_quote_id: seller.shipping_quote_id as string,
-                  payment_id: payment.id,
-                })
-              } catch (err) {
-                console.error(`[MP Processor] Failed creating sales order for seller=${seller.seller_profile_id}:`, err instanceof Error ? err.message : err)
-              }
-            })(),
-          )
         }
-      }
 
-      Promise.allSettled(notificationTasks).catch(() => {})
+        Promise.allSettled(notificationTasks).catch(() => {})
+      }
     }
   } catch (err) {
     const errMsg = err instanceof Error ? err.message : String(err)

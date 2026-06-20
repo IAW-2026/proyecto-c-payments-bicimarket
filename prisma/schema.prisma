@@ -96,6 +96,7 @@ model Payment {
   checkout_url       String?        // MP checkout URL (init_point / sandbox_init_point)
   preference_id      String?        // MP preference ID
   approved_at        DateTime?
+  notified_at        DateTime?
   rejected_at        DateTime?
   cancelled_at       DateTime?
   created_at         DateTime        @default(now())
