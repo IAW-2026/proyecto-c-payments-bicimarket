@@ -103,7 +103,7 @@ export async function POST(req: Request) {
       if (dbErr?.code === 'P2002') {
         try {
           const existing = await prisma.mpWebhookEvent.findUnique({ where: { mp_event_id: mpEventId } })
-          if (existing && (existing.status === 'failed' || (existing.status === 'processing' && Date.now() - existing.created_at.getTime() > 5 * 60 * 1000))) {
+          if (existing && (existing.status === 'failed' || existing.status === 'processing')) {
             console.warn(`[MP Webhook] Retry of ${existing.status} event ${mpEventId}, reprocessing...`)
             await prisma.mpWebhookEvent.update({ where: { mp_event_id: mpEventId }, data: { status: 'received', last_error: null, processed_at: null } })
             isRetryOfFailed = true
@@ -155,7 +155,7 @@ export async function POST(req: Request) {
           if (subErr?.code === 'P2002') {
             try {
               const existing = await prisma.mpWebhookEvent.findUnique({ where: { mp_event_id: subEventId } })
-              if (existing && (existing.status === 'failed' || (existing.status === 'processing' && Date.now() - existing.created_at.getTime() > 5 * 60 * 1000))) {
+              if (existing && (existing.status === 'failed' || existing.status === 'processing')) {
                 console.warn(`[MP Webhook] Retrying ${existing.status} sub-event ${subEventId}...`)
                 await prisma.mpWebhookEvent.update({ where: { mp_event_id: subEventId }, data: { status: 'received', last_error: null, processed_at: null } })
                 processMpWebhookEvent(subEventId).catch((e) => console.error('[MP Webhook] merchant_order sub-event retry error', e))

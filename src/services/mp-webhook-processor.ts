@@ -37,6 +37,7 @@ function mapPaymentMethod(mpMethod?: string) {
  * or failed with connection pool errors. Runs before every processing attempt.
  */
 async function cleanupStaleWebhookEvents() {
+  const reprocessQueue: string[] = []
   try {
     const staleProcessing = await prisma.mpWebhookEvent.findMany({
       where: { status: 'processing', created_at: { lt: new Date(Date.now() - 5 * 60 * 1000) } },
@@ -44,6 +45,7 @@ async function cleanupStaleWebhookEvents() {
     for (const evt of staleProcessing) {
       console.warn(`[MP Processor] Cleaning stale 'processing' event ${evt.mp_event_id} from ${evt.created_at}`)
       await prisma.mpWebhookEvent.update({ where: { id: evt.id }, data: { status: 'received', last_error: 'stale: reset by cleanup', processed_at: null } })
+      reprocessQueue.push(evt.mp_event_id)
     }
 
     const poolFailed = await prisma.mpWebhookEvent.findMany({
@@ -52,9 +54,14 @@ async function cleanupStaleWebhookEvents() {
     for (const evt of poolFailed) {
       console.warn(`[MP Processor] Cleaning pool-failed event ${evt.mp_event_id}`)
       await prisma.mpWebhookEvent.update({ where: { id: evt.id }, data: { status: 'received', last_error: null, processed_at: null } })
+      reprocessQueue.push(evt.mp_event_id)
     }
   } catch (err) {
     console.error('[MP Processor] Cleanup error:', err instanceof Error ? err.message : err)
+  }
+
+  for (const id of reprocessQueue) {
+    processMpWebhookEvent(id).catch((e) => console.error(`[MP Processor] Reprocess of ${id} failed:`, e instanceof Error ? e.message : e))
   }
 }
 
