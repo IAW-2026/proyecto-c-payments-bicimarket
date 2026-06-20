@@ -146,6 +146,7 @@ export async function POST(req: Request) {
       }
 
       const payments = merchantOrder?.payments ?? []
+      const subEventPromises: Promise<void>[] = []
       for (const p of payments) {
         const paymentId = String(p.id)
         const subEventId = `merchant_order:${paymentId}:${dataId}`
@@ -161,17 +162,17 @@ export async function POST(req: Request) {
             },
           })
           console.log(`[MP Flow] Sub-event created, calling processMpWebhookEvent(${subEventId})`)
-          processMpWebhookEvent(subEventId).catch((e) => console.error('[MP Webhook] merchant_order sub-event error', e))
+          subEventPromises.push(processMpWebhookEvent(subEventId))
         } catch (subErr: any) {
           if (subErr?.code === 'P2002') {
             console.log(`[MP Flow] Sub-event P2002 subEventId=${subEventId}`)
             try {
               const existing = await prisma.mpWebhookEvent.findUnique({ where: { mp_event_id: subEventId } })
               console.log(`[MP Flow] Existing sub-event status=${existing?.status} subEventId=${subEventId}`)
-              if (existing && (existing.status === 'failed' || existing.status === 'processing')) {
+              if (existing && (existing.status === 'received' || existing.status === 'failed' || existing.status === 'processing')) {
                 console.log(`[MP Flow] Retrying ${existing.status} sub-event ${subEventId}`)
                 await prisma.mpWebhookEvent.update({ where: { mp_event_id: subEventId }, data: { status: 'received', last_error: null, processed_at: null } })
-                processMpWebhookEvent(subEventId).catch((e) => console.error('[MP Webhook] merchant_order sub-event retry error', e))
+                subEventPromises.push(processMpWebhookEvent(subEventId))
               } else {
                 console.log(`[MP Flow] Skipping duplicate sub-event ${subEventId} status=${existing?.status}`)
               }
@@ -181,6 +182,7 @@ export async function POST(req: Request) {
           }
         }
       }
+      await Promise.all(subEventPromises)
 
       return NextResponse.json({ ok: true })
     }
