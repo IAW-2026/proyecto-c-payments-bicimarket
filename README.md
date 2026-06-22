@@ -137,6 +137,42 @@ Toda la API vive bajo `/api/v1/`. Documentación interactiva en `/api-docs` (Swa
 
 ---
 
+---
+
+## Mejora: Job Queue para webhooks de Mercado Pago
+
+### Problema original
+
+Los webhooks de `merchant_order` pasaban la validación, pero el procesamiento de sub-eventos (un pago por cada orden) se hacía *fire-and-forget* (`Promise.all` sin `await`) y Vercel mataba la ejecución antes de completar, dejando el evento trabado como `received`. Además, el reintento de eventos trabados llamaba a `cleanupStaleWebhookEvents` que volvía a ejecutar `processMpWebhookEvent` fire-and-forget recursivamente, saturando el pool de 15 conexiones a PostgreSQL y dejando la app sin responder.
+
+### Solución: cola de trabajos en PostgreSQL
+
+Se reemplazó el procesamiento directo por una **job queue** persistente con dos tipos de trabajo:
+
+- **`process_webhook`**: llama al core processor (`processMpWebhookEventCore`) que consulta la API de MP, matchea el pago local, actualiza estado, crea receipt, y retorna si hubo transición a `approved`.
+- **`send_notification`**: notifica al buyer (`notifyBuyerOrderStatus`) o al seller (`createSellerSalesOrder`) con reintento independiente por cada destinatario.
+
+Cada request al webhook también drena la cola en un loop (`while (await processJobQueue() > 0) {}`), procesando primero los `process_webhook` que encolan los `send_notification`, y luego estos últimos, todo dentro del mismo request.
+
+### Cambios concretos
+
+| Antes | Después |
+|---|---|
+| Sub-eventos fire-and-forget, Vercel los mataba | Sub-eventos encolados como jobs, se procesan sincrónicamente |
+| `cleanupStaleWebhookEvents` recursivo saturaba conexiones | Eliminado; los reintentos los maneja la cola con *exponential backoff* |
+| Notificaciones inline en el procesador, sin reintento | Jobs separados por destinatario, cada uno con hasta 10 reintentos (30s → 60s → … → 256min) |
+| Sin protección contra notificaciones duplicadas | `notified_at` en Payment con *atomic claim* (`updateMany where notified_at: null`) |
+| Una falla en notificación bloqueaba todo el webhook | Fallo en encolar notificaciones se loggea pero no falla el job principal |
+
+### Estructura nueva
+
+- `WebhookJob` model + `WebhookJobStatus` enum en Prisma
+- `src/services/job-queue.service.ts` — `enqueueJob`, `dequeueJobs(limit=5)`, `completeJob`, `failJob` (backoff), `processJobQueue`
+- `src/services/webhook-job-handlers.ts` — `handleProcessWebhook` y `handleSendNotification`
+- `src/services/mp-webhook-processor.ts` — `processMpWebhookEventCore` (sin notificaciones ni cleanup)
+- `src/app/webhooks/mercadopago/route.ts` — enqueue + drain loop
+- `src/app/api/cron/drain-queue/route.ts` — backup diario (Vercel Cron, Hobby: 1 vez/día)
+
 ## Documentación
 
 Documentación completa en [`/docs/`](./docs/) y guías de referencia en [`/referencias/`](./referencias/).

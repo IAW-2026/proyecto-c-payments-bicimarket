@@ -21,7 +21,6 @@ export async function enqueueJob(
     },
   })
   if (active) {
-    console.log(`[JobQueue] Active job exists for ${mpEventId}/${jobType} (status=${active.status}), skipping enqueue`)
     return
   }
 
@@ -34,7 +33,6 @@ export async function enqueueJob(
       scheduled_at: new Date(),
     },
   })
-  console.log(`[JobQueue] Enqueued ${jobType} job for mpEventId=${mpEventId}`)
 }
 
 export async function dequeueJobs(limit = 5) {
@@ -90,8 +88,6 @@ export async function failJob(jobId: string, error: string): Promise<void> {
 export async function processJobQueue(): Promise<number> {
   const jobs = await dequeueJobs()
   if (jobs.length === 0) return 0
-
-  console.log(`[JobQueue] Processing ${jobs.length} jobs from queue`)
 
   for (const job of jobs) {
     try {

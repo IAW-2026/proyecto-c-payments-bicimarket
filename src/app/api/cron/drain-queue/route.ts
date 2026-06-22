@@ -5,8 +5,6 @@ import { prisma } from '@/lib/prisma'
 export const maxDuration = 60
 
 export async function GET() {
-  console.log('[Cron] drain-queue started')
-
   // Verify auth via VERCEL_CRON_TOKEN or CRON_SECRET
   // Vercel Cron doesn't support custom auth headers natively on Free/Hobby;
   // rely on the cron endpoint being invoked only by Vercel's internal scheduler.
@@ -29,6 +27,5 @@ export async function GET() {
     processed += before - after
   }
 
-  console.log(`[Cron] drain-queue finished, processed ${processed} jobs`)
   return NextResponse.json({ ok: true, processed })
 }

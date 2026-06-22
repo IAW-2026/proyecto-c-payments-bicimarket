@@ -438,6 +438,7 @@ Fuente de verdad de: `payment_id`, intentos, comprobantes, settlements (uno por 
 | `idempotency_key` | string unique | previene duplicados permanentemente |
 | `checkout_url` | string? | URL de MP (`init_point` / `sandbox_init_point`) |
 | `preference_id` | string? | ID de preferencia de MP |
+| `notified_at` | timestamp? | marca cuándo se notificó a buyer/seller (atomic claim previene duplicados) |
 | `approved_at` / `rejected_at` / `cancelled_at` | timestamps? | |
 | `created_at` / `updated_at` | timestamps | |
 
@@ -519,8 +520,24 @@ Fuente de verdad de: `payment_id`, intentos, comprobantes, settlements (uno por 
 | `signature_valid` | boolean | resultado de validar `MERCADOPAGO_WEBHOOK_SECRET` |
 | `processed_at` | timestamp? | |
 | `last_error` | string? | |
-| `status` | enum `received` \| `processed` \| `failed` | |
+| `status` | enum `received` \| `processing` \| `processed` \| `failed` | |
 | `created_at` | timestamp | |
+
+#### `webhook_jobs` (cola de trabajos para procesamiento de webhooks)
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id` | string PK | |
+| `mp_event_id` | string | id del evento de MP que originó el trabajo |
+| `job_type` | string | `process_webhook` \| `send_notification` |
+| `payload` | json | datos del trabajo (event ID, payment info, destinatario) |
+| `status` | enum `pending` \| `processing` \| `completed` \| `failed` | |
+| `attempts` | int | @default(0) |
+| `max_attempts` | int | @default(10) — reintento con backoff exponencial (30s → 60s → … → 256min) |
+| `last_error` | string? | |
+| `scheduled_at` | timestamp | @default(now()) — controla cuándo está disponible para desencolar; se actualiza en reintentos |
+| `created_at` / `updated_at` | timestamps | |
+
+Índice: `(status, scheduled_at)`, `(mp_event_id)`.
 
 #### `outbound_calls_log` (auditoría de llamadas REST a otras apps)
 | Campo | Tipo | Notas |
@@ -545,6 +562,7 @@ erDiagram
     payments ||--o{ settlements : "splits per seller"
     settlements ||--o{ payouts : "transfers"
     payments ||--o{ refunds : "may refund"
+    mp_webhook_events ||--o{ webhook_jobs : "may trigger"
 ```
 
 ---
@@ -667,11 +685,28 @@ pending ─► paid (terminal)
 - **Anterior**: Sin relación a `payouts`.
 - **Actual**: `payouts Payout[]` — un settlement puede tener múltiples intentos de payout.
 
-### H. Sin cambios
+### H. Payments App — Tabla `webhook_jobs` (nueva)
+
+| Campo | Anterior | Actual | Por qué |
+|-------|----------|--------|---------|
+| `webhook_jobs` | No existía | Modelo completo con cola de trabajos, reintento con backoff exponencial, `scheduled_at` | Reemplazó el procesamiento directo de webhooks por una job queue en PostgreSQL. Cada webhook encola un `process_webhook` que, al completarse, encola `send_notification` jobs (uno por destinatario). El reintento es automático con backoff: 30s → 60s → 2m → … → 256m (máx 10 intentos). |
+
+### I. Payments App — Campo `notified_at`
+
+| Campo | Anterior | Actual | Por qué |
+|-------|----------|--------|---------|
+| `notified_at` en `payments` | No existía | `timestamp?` | Atomic claim vía `updateMany(where: { notified_at: null })` para prevenir notificaciones duplicadas cuando dos jobs concurrentes procesan el mismo pago. |
+
+### J. Payments App — Tabla `mp_webhook_events`
+
+| Campo | Anterior | Actual | Por qué |
+|-------|----------|--------|---------|
+| `status` | `received \| processed \| failed` | `received \| processing \| processed \| failed` | Se agregó `processing` para reflejar el estado real durante el procesamiento, necesario para idempotencia y visibilidad en la UI de admin. |
+
+### K. Sin cambios
 
 - `payment_attempts` — idéntico.
-- `mp_webhook_events` — idéntico.
 - `outbound_calls_log` — idéntico.
-- Diagramas ER — idénticos.
+- Diagramas ER — salvo la relación `mp_webhook_events → webhook_jobs`, idénticos.
 - Máquinas de estado (§5) — idénticas.
 - Datos duplicados (§6) — idéntico salvo la fila de identidad actualizada.

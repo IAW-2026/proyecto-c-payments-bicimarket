@@ -27,11 +27,8 @@ export async function handleProcessWebhook(job: JobRecord): Promise<HandlerResul
       data: { notified_at: new Date() },
     })
     if (claim.count === 0) {
-      console.log(`[JobHandler] Notifications already claimed for payment ${result.paymentId}, skipping`)
       return { success: true }
     }
-
-    console.log(`[JobHandler] Payment ${result.paymentId} approved, enqueueing notification jobs`)
 
     const basePayload = {
       mp_event_id: job.mp_event_id,
@@ -87,7 +84,6 @@ export async function handleSendNotification(job: JobRecord): Promise<HandlerRes
   try {
     if (p.recipient_type === 'buyer') {
       await notifyBuyerOrderStatus(p.order_id, 'paid', p.payment_id)
-      console.log(`[JobHandler] Buyer notified for payment ${p.payment_id}`)
     } else if (p.recipient_type === 'seller') {
       await createSellerSalesOrder(p.seller_profile_id, {
         order_id: p.order_id,
@@ -103,7 +99,6 @@ export async function handleSendNotification(job: JobRecord): Promise<HandlerRes
         shipping_quote_id: p.shipping_quote_id,
         payment_id: p.payment_id,
       })
-      console.log(`[JobHandler] Seller ${p.seller_profile_id} notified for payment ${p.payment_id}`)
     } else {
       console.warn(`[JobHandler] Unknown recipient_type=${p.recipient_type} for payment ${p.payment_id}`)
     }
