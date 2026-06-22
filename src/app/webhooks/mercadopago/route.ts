@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { validatePaymentWebhookSignature } from '@/lib/webhook-signature'
-import { processMpWebhookEvent } from '@/services/mp-webhook-processor'
+import { enqueueJob, processJobQueue } from '@/services/job-queue.service'
 
 export const maxDuration = 60
 
@@ -93,7 +93,7 @@ export async function POST(req: Request) {
     const action = payload?.action || payload?.topic || 'unknown'
     const mpEventId = xRequestId || `${action}:${dataId}`
 
-    let isRetryOfFailed = false
+    let shouldEnqueue = false
     try {
       await prisma.mpWebhookEvent.create({
         data: {
@@ -104,15 +104,16 @@ export async function POST(req: Request) {
         },
       })
       console.log(`[MP Flow] Main event created mpEventId=${mpEventId}`)
+      shouldEnqueue = true
     } catch (dbErr: any) {
       if (dbErr?.code === 'P2002') {
         console.log(`[MP Flow] Main event P2002 mpEventId=${mpEventId}`)
         try {
           const existing = await prisma.mpWebhookEvent.findUnique({ where: { mp_event_id: mpEventId } })
-          if (existing && (existing.status === 'failed' || existing.status === 'processing')) {
+          if (existing && (existing.status === 'received' || existing.status === 'failed' || existing.status === 'processing')) {
             console.log(`[MP Flow] Retrying ${existing.status} event ${mpEventId}`)
             await prisma.mpWebhookEvent.update({ where: { mp_event_id: mpEventId }, data: { status: 'received', last_error: null, processed_at: null } })
-            isRetryOfFailed = true
+            shouldEnqueue = true
           } else {
             console.log(`[MP Flow] Skipping duplicate mpEventId=${mpEventId} status=${existing?.status}`)
             return NextResponse.json({ ok: true })
@@ -132,7 +133,7 @@ export async function POST(req: Request) {
       console.warn('[MP Webhook] Invalid signature for', mpEventId, '— processing anyway')
     }
 
-    // ── Merchant_order: fetch order, process each payment ──
+    // ── Merchant_order: fetch order, enqueue jobs for each payment ──
     if (isMerchantOrder) {
       console.log(`[MP Flow] Entering merchant_order branch dataId=${dataId}`)
       const { default: mpSvc } = await import('@/services/mercado-pago.service')
@@ -146,7 +147,6 @@ export async function POST(req: Request) {
       }
 
       const payments = merchantOrder?.payments ?? []
-      const subEventPromises: Promise<void>[] = []
       for (const p of payments) {
         const paymentId = String(p.id)
         const subEventId = `merchant_order:${paymentId}:${dataId}`
@@ -161,8 +161,8 @@ export async function POST(req: Request) {
               status: 'received',
             },
           })
-          console.log(`[MP Flow] Sub-event created, calling processMpWebhookEvent(${subEventId})`)
-          subEventPromises.push(processMpWebhookEvent(subEventId))
+          console.log(`[MP Flow] Sub-event created, enqueuing job for ${subEventId}`)
+          await enqueueJob(subEventId, 'process_webhook', { mp_event_id: subEventId })
         } catch (subErr: any) {
           if (subErr?.code === 'P2002') {
             console.log(`[MP Flow] Sub-event P2002 subEventId=${subEventId}`)
@@ -170,9 +170,9 @@ export async function POST(req: Request) {
               const existing = await prisma.mpWebhookEvent.findUnique({ where: { mp_event_id: subEventId } })
               console.log(`[MP Flow] Existing sub-event status=${existing?.status} subEventId=${subEventId}`)
               if (existing && (existing.status === 'received' || existing.status === 'failed' || existing.status === 'processing')) {
-                console.log(`[MP Flow] Retrying ${existing.status} sub-event ${subEventId}`)
+                console.log(`[MP Flow] Re-enqueuing ${existing.status} sub-event ${subEventId}`)
                 await prisma.mpWebhookEvent.update({ where: { mp_event_id: subEventId }, data: { status: 'received', last_error: null, processed_at: null } })
-                subEventPromises.push(processMpWebhookEvent(subEventId))
+                await enqueueJob(subEventId, 'process_webhook', { mp_event_id: subEventId })
               } else {
                 console.log(`[MP Flow] Skipping duplicate sub-event ${subEventId} status=${existing?.status}`)
               }
@@ -182,18 +182,21 @@ export async function POST(req: Request) {
           }
         }
       }
-      await Promise.all(subEventPromises)
 
+      // Drain the queue before returning
+      await processJobQueue()
+      console.log(`[MP Flow] Merchant_order handler done for ${mpEventId}`)
       return NextResponse.json({ ok: true })
     }
 
-    console.log(`[MP Flow] Calling processMpWebhookEvent directly for ${mpEventId}`)
-    try {
-      await processMpWebhookEvent(mpEventId)
-    } catch (procErr) {
-      console.error('[MP Webhook] Processor error:', procErr)
+    // ── Payment webhook: enqueue job for direct processing ──
+    if (shouldEnqueue) {
+      console.log(`[MP Flow] Enqueuing job for ${mpEventId}`)
+      await enqueueJob(mpEventId, 'process_webhook', { mp_event_id: mpEventId })
     }
 
+    // Drain queue before returning
+    await processJobQueue()
     console.log(`[MP Flow] Webhook handler done for ${mpEventId}`)
     return NextResponse.json({ ok: true })
   } catch (err) {

@@ -79,6 +79,13 @@ enum HttpMethod {
   DELETE
 }
 
+enum WebhookJobStatus {
+  pending
+  processing
+  completed
+  failed
+}
+
 // Payments app core models
 model Payment {
   id                 String          @id @default(cuid())
@@ -255,6 +262,23 @@ model MpWebhookEvent {
   created_at      DateTime          @default(now())
 
   @@index([status])
+}
+
+model WebhookJob {
+  id            String           @id @default(cuid())
+  mp_event_id   String
+  job_type      String
+  payload       Json
+  status        WebhookJobStatus @default(pending)
+  attempts      Int              @default(0)
+  max_attempts  Int              @default(10)
+  last_error    String?
+  scheduled_at  DateTime         @default(now())
+  created_at    DateTime         @default(now())
+  updated_at    DateTime         @updatedAt
+
+  @@index([status, scheduled_at])
+  @@index([mp_event_id])
 }
 
 model OutboundCallLog {
