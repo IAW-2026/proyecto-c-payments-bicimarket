@@ -87,9 +87,9 @@ export async function failJob(jobId: string, error: string): Promise<void> {
   })
 }
 
-export async function processJobQueue(): Promise<void> {
+export async function processJobQueue(): Promise<number> {
   const jobs = await dequeueJobs()
-  if (jobs.length === 0) return
+  if (jobs.length === 0) return 0
 
   console.log(`[JobQueue] Processing ${jobs.length} jobs from queue`)
 
@@ -118,4 +118,6 @@ export async function processJobQueue(): Promise<void> {
       await failJob(job.id, errMsg)
     }
   }
+
+  return jobs.length
 }

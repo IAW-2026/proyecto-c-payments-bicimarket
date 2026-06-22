@@ -183,8 +183,8 @@ export async function POST(req: Request) {
         }
       }
 
-      // Drain the queue before returning
-      await processJobQueue()
+      // Drain the queue before returning (loop to catch jobs enqueued by handlers)
+      while (await processJobQueue() > 0) {}
       console.log(`[MP Flow] Merchant_order handler done for ${mpEventId}`)
       return NextResponse.json({ ok: true })
     }
@@ -195,8 +195,8 @@ export async function POST(req: Request) {
       await enqueueJob(mpEventId, 'process_webhook', { mp_event_id: mpEventId })
     }
 
-    // Drain queue before returning
-    await processJobQueue()
+    // Drain queue before returning (loop to catch jobs enqueued by handlers)
+    while (await processJobQueue() > 0) {}
     console.log(`[MP Flow] Webhook handler done for ${mpEventId}`)
     return NextResponse.json({ ok: true })
   } catch (err) {
