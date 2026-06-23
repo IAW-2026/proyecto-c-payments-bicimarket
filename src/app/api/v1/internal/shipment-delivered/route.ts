@@ -1,71 +1,79 @@
 import { NextResponse } from 'next/server'
+import { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
 import { validateServiceTokenShipping } from '@/lib/service-token'
-import { requireAdmin } from '@/lib/admin-auth'
 import { calculateSettlementAmounts } from '@/services/settlement.service'
-import { notifySellerPaymentStatus } from '@/services/inter-app-client.service'
 import { handleRouteError, badRequest, notFound, unauthorized } from '@/lib/errors'
+import { shipmentDeliveredSchema } from '@/schemas/payment'
 
 export async function POST(req: Request) {
   try {
     const svcToken = req.headers.get('X-Service-Token') || req.headers.get('x-service-token')
     if (!validateServiceTokenShipping(svcToken)) {
-      const adminErr = await requireAdmin()
-      if (adminErr) return unauthorized('Invalid or missing service token', 'SERVICE_TOKEN_INVALID')
+      return unauthorized('Invalid or missing service token', 'SERVICE_TOKEN_INVALID')
     }
 
     const body = await req.json()
-    const requiredFields = ['shipment_id', 'order_id', 'order_seller_group_id', 'sales_order_id', 'seller_profile_id', 'delivered_at']
-    for (const field of requiredFields) {
-      if (!body[field]) {
-        return badRequest('MISSING_REQUIRED_FIELD', `Missing required field: ${field}`)
-      }
+    const parsed = shipmentDeliveredSchema.safeParse(body)
+    if (!parsed.success) {
+      const firstIssue = parsed.error.issues[0]
+      return badRequest('VALIDATION_ERROR', firstIssue.message)
     }
 
-    const { shipment_id, order_id, order_seller_group_id, sales_order_id, seller_profile_id, delivered_at } = body
+    const { shipment_id, order_id, order_seller_group_id, sales_order_id, seller_profile_id, delivered_at } = parsed.data
 
-    const payment = await prisma.payment.findFirst({ where: { order_id } })
+    const payment = await prisma.payment.findFirst({
+      where: { order_id, status: 'approved' },
+    })
     if (!payment) {
-      return notFound('PAYMENT_NOT_FOUND', 'Payment not found for order', { order_id })
+      return notFound('PAYMENT_NOT_FOUND', 'No approved payment found for order', { order_id })
     }
 
     const sellerAmounts = getSellerAmountFromPayment(payment, seller_profile_id)
+    const deliveredAtDate = new Date(delivered_at)
 
-    let settlement = await prisma.settlement.findFirst({
-      where: { payment_id: payment.id, seller_profile_id },
-    })
-
-    if (settlement) {
-      // Settlement already exists; keep it as pending until payout is processed.
-      // Do NOT auto-mark paid — that happens via payout or admin action.
-    } else {
-      settlement = await prisma.settlement.create({
-        data: {
-          payment_id: payment.id,
-          order_id,
-          order_seller_group_id,
-          seller_profile_id,
-          gross_amount_cents: sellerAmounts.gross,
-          fee_amount_cents: sellerAmounts.fee,
-          net_amount_cents: sellerAmounts.net,
-          currency: payment.currency,
-          status: 'pending',
-        },
-      })
-      await prisma.settlementStatusHistory.create({
-        data: {
-          settlement_id: settlement.id,
-          to_status: 'pending',
-          changed_by: 'system',
-          reason: 'Settlement created on shipment delivery',
-        },
-      })
-    }
+    let settlement
 
     try {
-      await notifySellerPaymentStatus(sales_order_id, 'settled', settlement.id)
+      await prisma.$transaction(async (tx) => {
+        settlement = await tx.settlement.create({
+          data: {
+            payment_id: payment.id,
+            order_id,
+            order_seller_group_id,
+            sales_order_id,
+            seller_profile_id,
+            shipment_id,
+            delivered_at: deliveredAtDate,
+            gross_amount_cents: sellerAmounts.gross,
+            fee_amount_cents: sellerAmounts.fee,
+            net_amount_cents: sellerAmounts.net,
+            currency: payment.currency,
+            status: 'pending',
+          },
+        })
+        await tx.settlementStatusHistory.create({
+          data: {
+            settlement_id: settlement.id,
+            to_status: 'pending',
+            changed_by: 'system',
+            reason: 'Settlement created on shipment delivery',
+          },
+        })
+      })
     } catch (err) {
-      console.error('[ShipmentDelivered] notifySellerPaymentStatus failed:', err instanceof Error ? err.message : err)
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        settlement = await prisma.settlement.findFirst({
+          where: { payment_id: payment.id, seller_profile_id },
+        })
+        if (!settlement) throw err
+      } else {
+        throw err
+      }
+    }
+
+    if (!settlement) {
+      throw new Error('Settlement could not be created or found')
     }
 
     return NextResponse.json({ received: true, settlement_id: settlement.id }, { status: 200 })

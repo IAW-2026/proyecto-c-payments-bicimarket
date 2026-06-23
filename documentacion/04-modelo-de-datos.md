@@ -474,7 +474,10 @@ Fuente de verdad de: `payment_id`, intentos, comprobantes, settlements (uno por 
 | `payment_id` | string FK | |
 | `order_id` | string | |
 | `order_seller_group_id` | string | |
+| `sales_order_id` | string | ID de la sales order en Seller App |
 | `seller_profile_id` | string | |
+| `shipment_id` | string | ID del envío (shp_...) que disparó la liquidación |
+| `delivered_at` | timestamp | ISO 8601 timestamp de entrega reportado por Shipping |
 | `gross_amount_cents` | int | subtotal del seller (sin envío del marketplace, según política) |
 | `fee_amount_cents` | int | comisión del marketplace |
 | `net_amount_cents` | int | gross - fee |
@@ -684,6 +687,7 @@ pending ─► paid (terminal)
 #### `settlements`
 - **Anterior**: Sin relación a `payouts`.
 - **Actual**: `payouts Payout[]` — un settlement puede tener múltiples intentos de payout.
+- **Nuevos campos**: `sales_order_id`, `shipment_id`, `delivered_at` — se persisten los datos del request `shipment-delivered` para trazabilidad.
 
 ### H. Payments App — Tabla `webhook_jobs` (nueva)
 

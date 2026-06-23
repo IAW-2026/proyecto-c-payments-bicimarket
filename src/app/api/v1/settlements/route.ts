@@ -4,6 +4,7 @@ import { validateServiceTokenSeller, validateServiceTokenAnalytics } from '@/lib
 import { requireAdmin } from '@/lib/admin-auth'
 import { validateSettlementTransition } from '@/lib/state-machines/settlement'
 import { handleRouteError } from '@/lib/errors'
+import { notifySellerPaymentStatus } from '@/services/inter-app-client.service'
 
 export async function PATCH(req: Request) {
   try {
@@ -56,6 +57,12 @@ export async function PATCH(req: Request) {
             },
           })
         })
+
+        try {
+          await notifySellerPaymentStatus(settlement.sales_order_id, 'settled', settlementId)
+        } catch (notifyErr) {
+          console.error('[Settlements] notifySellerPaymentStatus failed:', notifyErr instanceof Error ? notifyErr.message : notifyErr)
+        }
 
         results.push({ id: settlementId, status: 'marked_paid' })
       } catch (err) {

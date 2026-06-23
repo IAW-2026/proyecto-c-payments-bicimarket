@@ -56,6 +56,18 @@ export const createSettlementSchema = z.object({
   currency: z.string().default('ARS'),
 })
 
+export const shipmentDeliveredSchema = z.object({
+  shipment_id: z.string().min(1),
+  order_id: z.string().min(1),
+  order_seller_group_id: z.string().min(1),
+  sales_order_id: z.string().min(1),
+  seller_profile_id: z.string().min(1),
+  delivered_at: z.string().min(1).refine(
+    (val) => !isNaN(Date.parse(val)),
+    { message: 'delivered_at must be a valid ISO 8601 date' }
+  ),
+})
+
 export type CreatePaymentInput = z.infer<typeof createPaymentSchema>
 export type CreateRefundInput = z.infer<typeof createRefundSchema>
 export type CreateSettlementInput = z.infer<typeof createSettlementSchema>
