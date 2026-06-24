@@ -1,3 +1,8 @@
+// Payments App — BiciMarket
+// Usage: npx tsx seeds/seed-payments.ts
+// Adjust the import path to match your Prisma client output location.
+// For this app: import { PrismaClient, ... } from '../src/generated/prisma/client';
+
 import { Prisma } from '../src/generated/prisma/client'
 import { PrismaClient } from '../src/generated/prisma/client'
 
@@ -31,8 +36,8 @@ function pick<T>(arr: readonly T[]): T {
 // ─── Shared Reference Data ───────────────────────────────────────────────────
 
 const BUYERS = Array.from({ length: 25 }, (_, i) => ({
-  id: `byp_buyer_${pad(i + 1)}`,
-  clerk: `user_buyer_${pad(i + 1)}`,
+  id: `byp2_buyer_${pad(i + 1)}`,
+  clerk: `user2_buyer_${pad(i + 1)}`,
 }))
 
 const AMOUNTS = [5000000, 15000000, 30000000, 50000000, 75000000, 100000000, 150000000, 200000000, 250000000, 350000000]
@@ -49,32 +54,6 @@ type RefundReason = 'seller_rejected' | 'buyer_cancelled' | 'not_delivered' | 'm
 async function main() {
   console.log('🌱 Seeding Payments App...\n')
 
-  // Clean existing data
-  console.log('Cleaning existing data...')
-  const cleanOrder = [
-    'outboundCallLog', 'webhookJob', 'mpWebhookEvent',
-    'refundStatusHistory', 'refund',
-    'payout', 'settlementStatusHistory', 'settlement',
-    'receipt', 'paymentAttempt', 'paymentStatusHistory', 'payment',
-  ] as const
-  const modelMap: Record<string, any> = {
-    outboundCallLog: prisma.outboundCallLog,
-    webhookJob: prisma.webhookJob,
-    mpWebhookEvent: prisma.mpWebhookEvent,
-    refundStatusHistory: prisma.refundStatusHistory,
-    refund: prisma.refund,
-    payout: prisma.payout,
-    settlementStatusHistory: prisma.settlementStatusHistory,
-    settlement: prisma.settlement,
-    receipt: prisma.receipt,
-    paymentAttempt: prisma.paymentAttempt,
-    paymentStatusHistory: prisma.paymentStatusHistory,
-    payment: prisma.payment,
-  }
-  for (const m of cleanOrder) {
-    await (modelMap[m] as any).deleteMany()
-  }
-  console.log('  Clean done.\n')
 
   let paymentCount = 0
   let receiptCount = 0
@@ -99,7 +78,7 @@ async function main() {
   for (let i = 0; i < TOTAL; i++) {
     const idx = pad(i + 1)
     const buyer = BUYERS[i % BUYERS.length]
-    const sellerId = `slp_seller_${pad((i % 10) + 1)}`
+    const sellerId = `slp2_seller_${pad((i % 10) + 1)}`
     const amount = AMOUNTS[i % AMOUNTS.length]
     const method = pick(METHODS)
     const currency = 'ARS'
@@ -107,9 +86,9 @@ async function main() {
     const status = statuses[i]
     const isFinal = status === 'approved' || status === 'refunded'
 
-    // Multi-seller every 5th payment
+    // Multi-seller every 5th payment (orders 5, 10, 15, ...)
     const isMultiSeller = isFinal && (i + 1) % 5 === 0 && i > 0
-    const secondSellerId = isMultiSeller ? `slp_seller_${pad(((i + 3) % 10) + 1)}` : null
+    const secondSellerId = isMultiSeller ? `slp2_seller_${pad(((i + 3) % 10) + 1)}` : null
 
     // Time distribution: older payments get more days back
     const daysBack = 85 - i * 2
@@ -117,11 +96,11 @@ async function main() {
     const approvedDate = addDays(createdDate, 1)
     const deliveredDate = addDays(createdDate, 5)
 
-    const idempotencyKey = `ik_seed_${idx}`
+    const idempotencyKey = `ik_seed2_${idx}`
     const preferenceId = String(2000000 + i)
     const checkoutUrl = `https://www.mercadopago.com.ar/checkout/v1/redirect?pref_id=${preferenceId}`
 
-    const orderId = `ord_buyer_${idx}`
+    const orderId = `ord2_buyer_${idx}`
     const osgId = `osg_${orderId}_${sellerId}`
     const salesOrderId = `sor_${sellerId}_${idx}`
 
@@ -135,7 +114,7 @@ async function main() {
     // ── Payment ──
     const payment = await prisma.payment.create({
       data: {
-        id: `pay_payment_${idx}`,
+        id: `pay2_payment_${idx}`,
         order_id: orderId,
         buyer_profile_id: buyer.id,
         buyer_clerk_user_id: buyer.clerk,
@@ -252,10 +231,10 @@ async function main() {
       await prisma.receipt.create({
         data: {
           payment_id: payment.id,
-          receipt_number: `RCP-${String(10000 + i).slice(1)}`,
+          receipt_number: `RCP-2-${String(10000 + i).slice(1)}`,
           receipt_url: `https://api.mercadopago.com/v1/payments/${2000000 + i}/receipt`,
           amount_cents: amount,
-          idempotency_key: `ik_receipt_${idx}`,
+          idempotency_key: `ik_receipt2_${idx}`,
           issued_at: approvedDate,
           created_at: approvedDate,
         },
@@ -296,17 +275,21 @@ async function main() {
       })
       settlementCount++
 
+      // SettlementStatusHistory
+      const sFrom: SettlementStatus | null = sStatus === 'pending' ? null : 'pending'
+      const sReason = sStatus === 'paid' ? 'settlement_paid_via_payout'
+        : sStatus === 'pending' ? 'settlement_created_after_delivery'
+        : sStatus === 'failed' ? 'settlement_payout_failed'
+        : 'settlement_marked_manual_review_by_admin'
+
       await prisma.settlementStatusHistory.create({
         data: {
           settlement_id: settlement.id,
-          from_status: sStatus === 'pending' ? null : 'pending',
+          from_status: sFrom,
           to_status: sStatus,
           changed_by: 'system',
-          reason: sStatus === 'paid' ? 'settlement_paid_via_payout'
-            : sStatus === 'pending' ? 'settlement_created_after_delivery'
-            : sStatus === 'failed' ? 'settlement_payout_failed'
-            : 'settlement_marked_manual_review_by_admin',
-          created_at: sStatus === 'pending' ? deliveredDate : addDays(deliveredDate, 1),
+          reason: sReason,
+          created_at: sFrom ? addDays(deliveredDate, 1) : deliveredDate,
         },
       })
 
@@ -316,11 +299,11 @@ async function main() {
         await prisma.payout.create({
           data: {
             settlement_id: settlement.id,
-            transfer_id: pStatus === 'completed' ? `trf_${4000000 + i}` : null,
+            transfer_id: pStatus === 'completed' ? `trf2_${4000000 + i}` : null,
             status: pStatus,
             attempts: pStatus === 'completed' ? 1 : pStatus === 'failed' ? 3 : 0,
             last_error: pStatus === 'failed' ? 'Transfer rejected by MP: invalid collector_id' : null,
-            idempotency_key: `ik_payout_${idx}`,
+            idempotency_key: `ik_payout2_${idx}`,
             ...(pStatus === 'completed' || pStatus === 'failed' ? { started_at: addDays(deliveredDate, 1) } : {}),
             ...(pStatus === 'completed' ? { completed_at: addDays(deliveredDate, 2) } : {}),
             created_at: deliveredDate,
@@ -384,20 +367,22 @@ async function main() {
             reason,
             status: refStatus,
             gateway_reference: refStatus !== 'pending' ? `mp_refund_${3000000 + i}` : null,
-            idempotency_key: `ik_refund_${idx}`,
+            idempotency_key: `ik_refund2_${idx}`,
             created_at: addDays(approvedDate, isFull ? 7 : 2),
           },
         })
         refundCount++
 
+        // RefundStatusHistory
+        const rFrom: RefundStatus | null = refStatus === 'pending' ? null : 'pending'
         await prisma.refundStatusHistory.create({
           data: {
             refund_id: refund.id,
-            from_status: refStatus === 'pending' ? null : 'pending',
+            from_status: rFrom,
             to_status: refStatus,
             changed_by: 'system',
             reason: refStatus === 'approved' ? 'refund_processed_by_mp' : refStatus === 'failed' ? 'refund_failed_mp_error' : 'refund_requested',
-            created_at: refStatus === 'pending' ? addDays(approvedDate, isFull ? 7 : 2) : addDays(approvedDate, isFull ? 8 : 3),
+            created_at: rFrom ? addDays(approvedDate, isFull ? 8 : 3) : addDays(approvedDate, isFull ? 7 : 2),
           },
         })
       }
@@ -410,7 +395,7 @@ async function main() {
         : 'payment.refunded'
       await prisma.mpWebhookEvent.create({
         data: {
-          mp_event_id: `mp_evt_seed_${idx}`,
+          mp_event_id: `mp_evt_seed2_${idx}`,
           event_type: eventType,
           payload: {
             action: eventType,
@@ -427,11 +412,12 @@ async function main() {
       })
       webhookCount++
 
+      // ── WebhookJob (process_webhook + send_notification) ──
       await prisma.webhookJob.create({
         data: {
-          mp_event_id: `mp_evt_seed_${idx}`,
+          mp_event_id: `mp_evt_seed2_${idx}`,
           job_type: 'process_webhook',
-          payload: { event_id: `mp_evt_seed_${idx}`, payment_id: payment.id },
+          payload: { event_id: `mp_evt_seed2_${idx}`, payment_id: payment.id },
           status: 'completed',
           attempts: 1,
           max_attempts: 10,
@@ -443,7 +429,7 @@ async function main() {
       if (isFinal) {
         await prisma.webhookJob.create({
           data: {
-            mp_event_id: `mp_evt_seed_${idx}`,
+            mp_event_id: `mp_evt_seed2_${idx}`,
             job_type: 'send_notification',
             payload: { target: 'buyer', endpoint: '/api/v1/orders/{id}/status', payment_id: payment.id, order_id: orderId },
             status: 'completed',
@@ -457,7 +443,7 @@ async function main() {
         if (isMultiSeller || i < 12) {
           await prisma.webhookJob.create({
             data: {
-              mp_event_id: `mp_evt_seed_${idx}`,
+              mp_event_id: `mp_evt_seed2_${idx}`,
               job_type: 'send_notification',
               payload: { target: 'seller', endpoint: '/api/v1/sales-orders', payment_id: payment.id, seller_profile_id: sellerId },
               status: 'completed',
@@ -475,7 +461,7 @@ async function main() {
     if (i === 1) {
       await prisma.mpWebhookEvent.create({
         data: {
-          mp_event_id: `mp_evt_seed_pending_${idx}`,
+          mp_event_id: `mp_evt_seed2_pending_${idx}`,
           event_type: 'payment.pending',
           payload: { action: 'payment.created', data: { id: String(2000000 + i) }, live_mode: false },
           signature_valid: true,
@@ -487,9 +473,9 @@ async function main() {
 
       await prisma.webhookJob.create({
         data: {
-          mp_event_id: `mp_evt_seed_pending_${idx}`,
+          mp_event_id: `mp_evt_seed2_pending_${idx}`,
           job_type: 'process_webhook',
-          payload: { event_id: `mp_evt_seed_pending_${idx}`, payment_id: payment.id },
+          payload: { event_id: `mp_evt_seed2_pending_${idx}`, payment_id: payment.id },
           status: 'processing',
           attempts: 2,
           max_attempts: 10,
@@ -503,7 +489,7 @@ async function main() {
     if (i === 3) {
       await prisma.mpWebhookEvent.create({
         data: {
-          mp_event_id: `mp_evt_seed_invalid_${idx}`,
+          mp_event_id: `mp_evt_seed2_invalid_${idx}`,
           event_type: 'merchant_order.created',
           payload: { action: 'test_webhook', data: {} },
           signature_valid: false,
@@ -516,9 +502,10 @@ async function main() {
     }
 
     if (i === 8) {
+      // A webhook that was received but processing keeps failing
       await prisma.mpWebhookEvent.create({
         data: {
-          mp_event_id: `mp_evt_seed_stuck_${idx}`,
+          mp_event_id: `mp_evt_seed2_stuck_${idx}`,
           event_type: 'payment.updated',
           payload: { action: 'payment.updated', data: { id: String(2000000 + i) }, live_mode: false },
           signature_valid: true,
@@ -531,9 +518,9 @@ async function main() {
 
       await prisma.webhookJob.create({
         data: {
-          mp_event_id: `mp_evt_seed_stuck_${idx}`,
+          mp_event_id: `mp_evt_seed2_stuck_${idx}`,
           job_type: 'process_webhook',
-          payload: { event_id: `mp_evt_seed_stuck_${idx}` },
+          payload: { event_id: `mp_evt_seed2_stuck_${idx}` },
           status: 'failed',
           attempts: 10,
           max_attempts: 10,
@@ -562,7 +549,7 @@ async function main() {
         target_app: pick(callTargets),
         method: pick(callMethods),
         path: pick(callPaths),
-        request_body: { payment_id: `pay_payment_${pad(i + 1)}` },
+        request_body: { payment_id: `pay2_payment_${pad(i + 1)}` },
         response_status: succeeded ? 200 : null,
         response_body: succeeded ? { ok: true } : Prisma.DbNull,
         attempts: succeeded ? 1 : 3,

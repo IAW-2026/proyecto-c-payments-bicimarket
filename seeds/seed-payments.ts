@@ -1,3 +1,8 @@
+// Payments App — BiciMarket
+// Usage: npx tsx seeds/seed-payments.ts
+// Adjust the import path to match your Prisma client output location.
+// For this app: import { PrismaClient, ... } from '../src/generated/prisma/client';
+
 import { Prisma } from '../src/generated/prisma/client'
 import { PrismaClient } from '../src/generated/prisma/client'
 
@@ -107,7 +112,7 @@ async function main() {
     const status = statuses[i]
     const isFinal = status === 'approved' || status === 'refunded'
 
-    // Multi-seller every 5th payment
+    // Multi-seller every 5th payment (orders 5, 10, 15, ...)
     const isMultiSeller = isFinal && (i + 1) % 5 === 0 && i > 0
     const secondSellerId = isMultiSeller ? `slp_seller_${pad(((i + 3) % 10) + 1)}` : null
 
@@ -296,17 +301,21 @@ async function main() {
       })
       settlementCount++
 
+      // SettlementStatusHistory
+      const sFrom: SettlementStatus | null = sStatus === 'pending' ? null : 'pending'
+      const sReason = sStatus === 'paid' ? 'settlement_paid_via_payout'
+        : sStatus === 'pending' ? 'settlement_created_after_delivery'
+        : sStatus === 'failed' ? 'settlement_payout_failed'
+        : 'settlement_marked_manual_review_by_admin'
+
       await prisma.settlementStatusHistory.create({
         data: {
           settlement_id: settlement.id,
-          from_status: sStatus === 'pending' ? null : 'pending',
+          from_status: sFrom,
           to_status: sStatus,
           changed_by: 'system',
-          reason: sStatus === 'paid' ? 'settlement_paid_via_payout'
-            : sStatus === 'pending' ? 'settlement_created_after_delivery'
-            : sStatus === 'failed' ? 'settlement_payout_failed'
-            : 'settlement_marked_manual_review_by_admin',
-          created_at: sStatus === 'pending' ? deliveredDate : addDays(deliveredDate, 1),
+          reason: sReason,
+          created_at: sFrom ? addDays(deliveredDate, 1) : deliveredDate,
         },
       })
 
@@ -390,14 +399,16 @@ async function main() {
         })
         refundCount++
 
+        // RefundStatusHistory
+        const rFrom: RefundStatus | null = refStatus === 'pending' ? null : 'pending'
         await prisma.refundStatusHistory.create({
           data: {
             refund_id: refund.id,
-            from_status: refStatus === 'pending' ? null : 'pending',
+            from_status: rFrom,
             to_status: refStatus,
             changed_by: 'system',
             reason: refStatus === 'approved' ? 'refund_processed_by_mp' : refStatus === 'failed' ? 'refund_failed_mp_error' : 'refund_requested',
-            created_at: refStatus === 'pending' ? addDays(approvedDate, isFull ? 7 : 2) : addDays(approvedDate, isFull ? 8 : 3),
+            created_at: rFrom ? addDays(approvedDate, isFull ? 8 : 3) : addDays(approvedDate, isFull ? 7 : 2),
           },
         })
       }
@@ -427,6 +438,7 @@ async function main() {
       })
       webhookCount++
 
+      // ── WebhookJob (process_webhook + send_notification) ──
       await prisma.webhookJob.create({
         data: {
           mp_event_id: `mp_evt_seed_${idx}`,
@@ -516,6 +528,7 @@ async function main() {
     }
 
     if (i === 8) {
+      // A webhook that was received but processing keeps failing
       await prisma.mpWebhookEvent.create({
         data: {
           mp_event_id: `mp_evt_seed_stuck_${idx}`,
